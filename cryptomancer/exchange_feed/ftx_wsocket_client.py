@@ -9,7 +9,7 @@ from gevent.event import Event
 
 from cryptomancer.exchange_feed.websocket_manager import WebsocketManager
 
-import cryptomancer.local_secrets
+import cryptomancer.local_secrets as local_secrets
 
 class FtxWebsocketClient(WebsocketManager):
     _ENDPOINT = 'wss://ftx.com/ws/'
