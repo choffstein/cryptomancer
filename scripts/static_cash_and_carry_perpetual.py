@@ -62,8 +62,8 @@ class FtxStaticCashAndCarryPerpetual(object):
         logger.info(f'Current Margin | ' + '{:.2%}'.format(margin_pct))
 
         # if we're within our collateral bounds, do nothing
-        #if margin_pct > self._cash_collateral_bounds[0] and margin_pct < self._cash_collateral_bounds[1]:
-        #    return
+        if margin_pct > self._cash_collateral_bounds[0] and margin_pct < self._cash_collateral_bounds[1]:
+            return
     
         logger.info('Margin Target Out of Bounds (' + '{:.2%}'.format(self._cash_collateral_bounds[0]) + ', ' + 
                                                     '{:.2%}'.format(self._cash_collateral_bounds[1]) + ')')
@@ -136,6 +136,7 @@ class FtxStaticCashAndCarryPerpetual(object):
         total_perpetual = total_perpetual + filled_size
 
         logger.info(f'Filled {filled_size} in {self._future_name} | Total: {total_perpetual}')
+
 
 if __name__ == '__main__':
     usage = "usage: " + sys.argv[0] + " <FTX Account Name> <Underlying> [optional-args]"
