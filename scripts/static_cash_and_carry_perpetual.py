@@ -37,20 +37,23 @@ class FtxStaticCashAndCarryPerpetual(object):
 		# get the current positions
 		positions = self._account.get_positions()
 
+		for position in positions:
+			logger.info(f'Current Position | {position.name} | {position.side} | {position.size} | ${position.usd_value}')
+
 		# figure out how much cash collateral we have
 		total_value = sum([position.usd_value for position in positions])
 		usd_value = sum([position.usd_value for position in filter(lambda position: position.name == 'USD', positions)])
 
 		margin_pct = usd_value / total_value
 
-		log.info(f'Current Margin | ' + '{:.2%}'.format(margin_pct))
+		logger.info(f'Current Margin | ' + '{:.2%}'.format(margin_pct))
 
 		# if we're within our collateral bounds, do nothing
 		if margin_pct > self._cash_collateral_bounds[0] and margin_pct < self._cash_collateral_bounds[1]:
-			return    
+			return
 	
-		logger.info('Margin Target Out of Bounds (' + '{:.2%}'.format(self.cash_collateral_bounds[0]) + ', ' + 
-													'{:.2%}'.format(self.cash_collateral_bounds[1]) + ')')
+		logger.info('Margin Target Out of Bounds (' + '{:.2%}'.format(self._cash_collateral_bounds[0]) + ', ' + 
+													'{:.2%}'.format(self._cash_collateral_bounds[1]) + ')')
 
 		# otherwise, figure out what our target positions are
 		target_margin_usd = total_value * self._cash_collateral_target
@@ -84,6 +87,25 @@ class FtxStaticCashAndCarryPerpetual(object):
 		total_underlying = sum([position.net_size for position in underlying_positions])
 
 		underlying_to_buy = (target_exposure_underlying - total_underlying)
+		underlying_to_buy = int(underlying_to_buy / self._minimum_size) * self._minimum_size
+
+		# generate our orders.  we'll just use market orders here
+		with execution_scope() as session:
+			if abs(underlying_to_buy) > self._minimum_size:
+				side = 'buy' if underlying_to_buy > 1e-8 else 'sell'  
+				size = abs(underlying_to_buy)
+
+				logger.info(f"{side.upper()} {size} {self._underlying_name}")
+				underlying_order = MarketOrder(account = self._account,
+									market = self._underlying_name,
+									side = side,
+									size = size)
+				session.add(underlying_order)
+		
+		order_status = session.get_order_statuses()[0]
+		
+		filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
+		total_underlying = total_underlying + filled_size
 
 		# get the current net position of the perpetuals
 		perpetual_positions = filter(lambda position: position.name.upper() == self._future_name, positions)
@@ -91,29 +113,20 @@ class FtxStaticCashAndCarryPerpetual(object):
 
 		# if we have 5 underlying, we need -5 perpetuals
 		# so we want to take that target and subtract what we already own
-		perpetual_to_buy = (-target_exposure_underlying - total_perpetual)
-
-		# generate our orders.  we'll just use market orders here
+		perpetual_to_buy = (-total_underlying - total_perpetual)
+		perpetual_to_buy = int(perpetual_to_buy / self._minimum_size) * self._minimum_size
 
 		with execution_scope() as session:
-			if abs(underlying_to_buy) > self._minimum_size:
-				side = 'buy' if underlying_to_buy > 1e-8 else 'sell'  
-
-				underlying_order = MarketOrder(account = self._account,
-									market = self._underlying_name,
-									side = side,
-									size = abs(underlying_to_buy))
-				#session.add(underlying_order)
-
 			if abs(perpetual_to_buy) > self._minimum_size:
 				side = 'buy' if perpetual_to_buy > 1e-8 else 'sell'
-
+				size = abs(perpetual_to_buy)
+				logger.info(f"{side.upper()} {size} {self._future_name}")
 				perpetual_order = MarketOrder(account = self._account,
 									market = self._future_name,
 									side = side,
-									size = abs(perpetual_to_buy))
+									size = size)
 			
-				#session.add(perpetual_order)
+				session.add(perpetual_order)
 
 
 
@@ -179,9 +192,11 @@ if __name__ == '__main__':
 	ftx_account = FtxAccount(account_name)
 	ftx_feed = FtxExchangeFeed(account_name)
 
-	cash_and_carry = StaticCashAndCarryPerpetual(ftx_account, ftx_feed, underlying, 
-							options.margin, (options.margin_lower, options.margin_higher))
+	cash_and_carry = FtxStaticCashAndCarryPerpetual(ftx_account, ftx_feed, underlying, 
+							options.margin, (options.margin_low, options.margin_high))
 	
 	while True:
+		start = time.time()
 		cash_and_carry.run()
-		time.sleep(options.sleep)
+		end = time.time()
+		time.sleep(options.sleep - (end - start))

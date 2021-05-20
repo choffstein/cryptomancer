@@ -166,7 +166,7 @@ def _update_funding_rates(perpetual: str):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Update FTX database.')
-    parser.add_argument('--sleep', dest='sleep', action='store', default=300,
+    parser.add_argument('--sleep', dest='sleep', action='store', default=600,
                         help='How long to sleep between refresh cycles')
 
     args = parser.parse_args()
@@ -200,7 +200,7 @@ if __name__ == '__main__':
         logger.info("Going to sleep...")
         end = time.time()
 
-        # re-run every 5 minutes
+        # sleep until it's time to run again
         time.sleep(max(0, args.sleep - (end - start)))
 
     Session.remove()

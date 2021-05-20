@@ -43,7 +43,7 @@ class MarketOrder(Order):
         except:
             pass            
 
-        order_status = self.status()
+        order_status = self.get_status()
         filled = order_status.size_filled
 
         if filled > 1e-8:
@@ -56,7 +56,7 @@ class MarketOrder(Order):
             self.wait_until_closed()
 
     @session_required 
-    def status(self) -> dict:
+    def get_status(self) -> dict:
         if not self.get_id():
             raise Exception("Cannot poll non-executed order.")
         
@@ -75,7 +75,7 @@ class MarketOrder(Order):
     def is_closed(self) -> bool:
         if not self.get_id():
             raise Exception("Cannot poll non-executed order.")
-        order_status = self.status()
+        order_status = self.get_status()
         return (order_status.status == 'closed')
 
     @session_required

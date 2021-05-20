@@ -51,7 +51,7 @@ class Order:
     def is_closed(self):
         raise NotImplementedError
 
-    def status(self):
+    def get_status(self):
         raise NotImplementedError
 
     def wait_until_closed(self):
