@@ -53,8 +53,10 @@ class FtxAccount(Account):
         return self.account.get_open_orders(market = market)
 
     def place_order(self, market: str, side: str, price: float, size: float, type: str = 'limit', reduce_only: bool = False, ioc: bool = False, post_only: bool = False, client_id: Optional[str] = None) -> dict:
+        
         order_status = self.account.place_order(market = market, side = side, price = price, size = size, type = type, 
                                  reduce_only = reduce_only, ioc = ioc, post_only = post_only, client_id = client_id)
+        
         return OrderStatus(order_id = order_status['id'],
                             created_time = pandas.Timestamp(order_status['createdAt']).to_pydatetime(),
                             market = order_status['market'],

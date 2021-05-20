@@ -2,6 +2,7 @@ from cryptomancer.account import Account
 from cryptomancer.exchange_feed import ExchangeFeed
 
 from cryptomancer.execution_handler.execution_session import ExecutionSession
+from cryptomancer.execution_handler.order_status import OrderStatus
 
 from typing import Optional
 
@@ -39,20 +40,71 @@ class Order:
     def set_id(self, order_id):
         self._id = order_id 
 
+    def failed(self):
+        return self._id == -1
+
+    @session_required
+    def cancel(self) -> dict:
+        if not self.get_id():
+            raise Exception("Cannot cancel non-executed order.")
+
+        if self.failed():
+            return
+
+        account = self.get_account()
+        return account.cancel_order(self.get_id())
+
+    @session_required
+    def is_pending(self) -> bool:
+        return (self.get_id() is None)
+
+    @session_required
+    def is_submitted(self) -> bool:
+        return not self.is_pending()
+
+    @session_required
+    def is_closed(self) -> bool:
+        if not self.get_id():
+            raise Exception("Cannot poll non-executed order.")
+
+        if self.failed():
+            return True
+
+        order_status = self.get_status()
+        return (order_status.status == 'closed')
+
+    @session_required
+    def wait_until_closed(self):
+        while True:
+            if self.is_closed():
+                break
+            # TODO: Better sleep method
+            time.sleep(1)
+
+    @session_required 
+    def get_status(self) -> dict:
+        if not self.get_id():
+            raise Exception("Cannot poll non-executed order.")
+        
+        if self.failed():
+            status = OrderStatus(order_id = -1,
+                            created_time = None,
+                            market = self._market,
+                            side = self._side,
+                            size = self._size,
+                            filled_size = 0,
+                            status = "closed"
+            )
+
+        else:
+            account = self.get_account()
+            status = account.get_order_status(self.get_id())
+
+        return status
+
     def submit(self):
         raise NotImplementedError
 
     def rollback(self):
         raise NotImplementedError
-
-    def cancel(self):
-        raise NotImplementedError
-
-    def is_closed(self):
-        raise NotImplementedError
-
-    def get_status(self):
-        raise NotImplementedError
-
-    def wait_until_closed(self):
-        raise NotImplementedError
+        

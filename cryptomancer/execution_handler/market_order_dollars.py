@@ -5,14 +5,18 @@ import datetime
 from cryptomancer.execution_handler import Order, session_required
 from cryptomancer.execution_handler.order_status import OrderStatus
 from cryptomancer.account import Account
+from cryptomancer.exchange_feed import ExchangeFeed
 
 
-class MarketOrder(Order):
-    def __init__(self, account: Account, market: str, side: str, size: float):
-        super().__init__(account, None)
+class MarketOrderDollars(Order):
+    def __init__(self, account: Account, exchange_feed: ExchangeFeed, 
+                 market: str, side: str, size_usd: float, attempts: Optional[int] = 5):
+        super().__init__(account, exchange_feed)
         self._market = market
         self._side = side
-        self._size = size
+        self._size_usd = size_usd
+        self._size = None
+        self._attempts = attempts
 
     @session_required
     def submit(self) -> dict:
@@ -20,6 +24,30 @@ class MarketOrder(Order):
             raise Exception("Cannot execute already working or finished market order.")
 
         account = self.get_account()
+        exchange_feed = self.get_exchange_feed()
+
+        for attempt in range(self._attempts):
+            try:
+                underlying_market = self._exchange_feed.get_current_market(self._market)
+                
+                if self._side == 'buy':
+                    target_underlying_px = underlying_market['ask']
+                else:
+                    target_underlying_px = underlying_market['bid']
+                
+                break
+
+            except:
+                # weird issue where the first time we subscribe to a websocket we can sometimes get
+                # a {} response; so probably just retry...
+                time.sleep(1)
+                continue
+        else:
+            # we failed all attempts (didn't break from loop)
+            raise Exception("Exchange feed issue")
+
+        self._size = self._size_usd / target_underlying_px
+
         try:
             status = account.place_order(market = self._market, side = self._side, price = None, 
                                     size = self._size, type = "market", ioc = True)
@@ -37,10 +65,9 @@ class MarketOrder(Order):
         self.set_id(status.order_id)
         return status
 
-
     @session_required
     def rollback(self):
-        if not self.get_id():
+        if not self.get_id() or self.failed():
             return
 
         try:
@@ -60,3 +87,4 @@ class MarketOrder(Order):
             self.set_id(status.order_id)
 
             self.wait_until_closed()
+
