@@ -17,132 +17,119 @@ from cryptomancer.execution_handler.market_order_dollars import MarketOrderDolla
 from cryptomancer.execution_handler.market_order import MarketOrder
 
 
-class FtxStaticCashAndCarryPerpetual(object):
-    def __init__(self, account: FtxAccount, exchange_feed: FtxExchangeFeed, 
-                underlying: str, cash_collateral_target: float, 
-                cash_collateral_bounds: Tuple[float, float], minimum_size = 0.001):
-        
-        self._account = account
-        self._exchange_feed = exchange_feed
-
-        self._underlying = underlying.upper()
-        self._underlying_name = f'{self._underlying}/USD'
-        self._future_name = f'{self._underlying}-PERP'
-        
-        self._cash_collateral_target = cash_collateral_target
-        self._cash_collateral_bounds = cash_collateral_bounds
-        self._minimum_size = minimum_size
-        
-
-    def run(self):
-        # get the current positions
-        positions = self._account.get_positions()
-
-        for position in positions:
-            logger.info(f'Current Position | {position.name} | {position.side} | {position.size} | ${position.usd_value}')
-        
-        usd_coins = list(filter(lambda position: position.name == 'USD', positions))
-        underlying_positions = list(filter(lambda position: position.name.upper() == self._underlying, positions))
-        perpetual_positions = list(filter(lambda position: position.name.upper() == self._future_name, positions))
-
-        # figure out how much cash collateral we have
-        # we have to be careful here because USD will already *include* PERP gains/losses,
-        # 	so we don't want to double-count those values
-        portfolio_value = sum([position.usd_value for position in usd_coins]) + \
-                            sum([position.usd_value for position in underlying_positions])
-
-        logger.info(f'Current Portfolio Value | ${portfolio_value}')
-
-        usd_value = sum([position.usd_value for position in usd_coins])
-        underlying_size = sum([position.net_size for position in underlying_positions])
-        perpetual_size = sum([position.net_size for position in perpetual_positions])
-
-        margin_pct = usd_value / portfolio_value
-
-        logger.info(f'Current Margin | ' + '{:.2%}'.format(margin_pct))
-
-        # if we're within our collateral bounds, do nothing
-        if margin_pct > self._cash_collateral_bounds[0] and margin_pct < self._cash_collateral_bounds[1]:
-            return
+def static_cash_and_carry(account: Account, exchange_feed: ExchangeFeed, underlying: str, 
+                        cash_collateral_target: float, cash_collateral_bounds: Tuple[float, float], 
+                        minimum_size: Optional[float] = 0.001):
+    underlying_name = f'{underlying}/USD'
+    future_name = f'{underlying}-PERP'
     
-        logger.info('Margin Target Out of Bounds (' + '{:.2%}'.format(self._cash_collateral_bounds[0]) + ', ' + 
-                                                    '{:.2%}'.format(self._cash_collateral_bounds[1]) + ')')
+    # get the current positions
+    positions = account.get_positions()
 
-        # otherwise, figure out what our target positions are
-        target_margin_usd = portfolio_value * self._cash_collateral_target
-        target_exposure_usd = portfolio_value * (1 - self._cash_collateral_target)
+    for position in positions:
+        logger.info(f'Current Position | {position.name} | {position.side} | {position.size} | ${position.usd_value}')
+    
+    usd_coins = list(filter(lambda position: position.name == 'USD', positions))
+    underlying_positions = list(filter(lambda position: position.name.upper() == underlying, positions))
+    perpetual_positions = list(filter(lambda position: position.name.upper() == future_name, positions))
 
-        current_exposure_usd = sum([position.usd_value for position in underlying_positions])
+    # figure out how much cash collateral we have
+    # we have to be careful here because USD will already *include* PERP gains/losses,
+    # 	so we don't want to double-count those values
+    portfolio_value = sum([position.usd_value for position in usd_coins]) + \
+                        sum([position.usd_value for position in underlying_positions])
 
-        target_usd_trade = target_exposure_usd - current_exposure_usd
+    logger.info(f'Current Portfolio Value | ${portfolio_value}')
 
-        # we do the trade in the underlying first because we're trying to hit a specific
-        # dollar amount; once we get that dollar amount executed, we can match it with
-        # a corresponding trade in the perpetuals
-        with execution_scope() as session:
-            side = 'buy' if target_usd_trade > 1e-8 else 'sell'
+    usd_value = sum([position.usd_value for position in usd_coins])
+    underlying_size = sum([position.net_size for position in underlying_positions])
+    perpetual_size = sum([position.net_size for position in perpetual_positions])
 
-            target_usd_trade = abs(target_usd_trade)
-            logger.info(f'{side.upper()} ${target_usd_trade} {self._underlying_name}')
-            underlying_order = MarketOrderDollars(account = self._account,
-                                                    exchange_feed = self._exchange_feed,
-                                                    market = self._underlying_name,
-                                                    side = side,
-                                                    size_usd = target_usd_trade)
+    margin_pct = usd_value / portfolio_value
 
-            session.add(underlying_order)
+    logger.info(f'Current Margin | ' + '{:.2%}'.format(margin_pct))
 
-        order_status = session.get_order_statuses()
-        if len(order_status) == 0:
-            # the order errored out
-            logger.info(f'{side.upper()} ${target_usd_trade} {self._underlying_name} FAILED')
-            return
-        else:
-            order_status = order_status[0]
+    # if we're within our collateral bounds, do nothing
+    if margin_pct > cash_collateral_bounds[0] and margin_pct < cash_collateral_bounds[1]:
+        return
 
-        # figure out how much of the order was actually filled
-        filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
-        total_underlying = sum([position.net_size for position in underlying_positions])
-        total_underlying = total_underlying + filled_size
+    logger.info('Margin Target Out of Bounds (' + '{:.2%}'.format(cash_collateral_bounds[0]) + ', ' + 
+                                                '{:.2%}'.format(cash_collateral_bounds[1]) + ')')
 
-        logger.info(f'Filled {filled_size} in {self._underlying_name} | Total: {total_underlying}')
+    # otherwise, figure out what our target positions are
+    target_margin_usd = portfolio_value * cash_collateral_target
+    target_exposure_usd = portfolio_value * (1 - cash_collateral_target)
 
-        # if we have 5 underlying, we need -5 perpetuals
-        # so we want to take that target and subtract what we already own
-        perpetual_to_buy = (-total_underlying - perpetual_size)
-        perpetual_to_buy = int(perpetual_to_buy / self._minimum_size) * self._minimum_size
+    current_exposure_usd = sum([position.usd_value for position in underlying_positions])
 
-        with execution_scope() as session:
-            side = 'buy' if perpetual_to_buy > 1e-8 else 'sell'
-            size = abs(perpetual_to_buy)
-            logger.info(f"{side.upper()} {size} {self._future_name}")
-            perpetual_order = MarketOrder(account = self._account,
-                                market = self._future_name,
-                                side = side,
-                                size = size)
-        
-            session.add(perpetual_order)
+    target_usd_trade = target_exposure_usd - current_exposure_usd
 
-        order_status = session.get_order_statuses()
-        if len(order_status) == 0:
-            # the order errored out
-            logger.info(f'{side.upper()} {size} {self._future_name} FAILED')
-            return
-        else:
-            order_status = order_status[0]
+    # we do the trade in the underlying first because we're trying to hit a specific
+    # dollar amount; once we get that dollar amount executed, we can match it with
+    # a corresponding trade in the perpetuals
+    with execution_scope() as session:
+        side = 'buy' if target_usd_trade > 1e-8 else 'sell'
 
-        filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
-        total_perpetual = sum([position.net_size for position in perpetual_positions])
-        total_perpetual = total_perpetual + filled_size
+        target_usd_trade = abs(target_usd_trade)
+        logger.info(f'{side.upper()} ${target_usd_trade} {underlying_name}')
+        underlying_order = MarketOrderDollars(account = account,
+                                                exchange_feed = exchange_feed,
+                                                market = underlying_name,
+                                                side = side,
+                                                size_usd = target_usd_trade)
 
-        logger.info(f'Filled {filled_size} in {self._future_name} | Total: {total_perpetual}')
+        session.add(underlying_order)
+
+    order_status = session.get_order_statuses()
+    if len(order_status) == 0:
+        # the order errored out
+        logger.info(f'{side.upper()} ${target_usd_trade} {underlying_name} FAILED')
+        return
+    else:
+        order_status = order_status[0]
+
+    # figure out how much of the order was actually filled
+    filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
+    total_underlying = sum([position.net_size for position in underlying_positions])
+    total_underlying = total_underlying + filled_size
+
+    logger.info(f'Filled {filled_size} in {underlying_name} | Total: {total_underlying}')
+
+    # if we have 5 underlying, we need -5 perpetuals
+    # so we want to take that target and subtract what we already own
+    perpetual_to_buy = (-total_underlying - perpetual_size)
+    perpetual_to_buy = int(perpetual_to_buy / minimum_size) * minimum_size
+
+    with execution_scope() as session:
+        side = 'buy' if perpetual_to_buy > 1e-8 else 'sell'
+        size = abs(perpetual_to_buy)
+        logger.info(f"{side.upper()} {size} {future_name}")
+        perpetual_order = MarketOrder(account = account,
+                            market = future_name,
+                            side = side,
+                            size = size)
+    
+        session.add(perpetual_order)
+
+    order_status = session.get_order_statuses()
+    if len(order_status) == 0:
+        # the order errored out
+        logger.info(f'{side.upper()} {size} {future_name} FAILED')
+        return
+    else:
+        order_status = order_status[0]
+
+    filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
+    total_perpetual = sum([position.net_size for position in perpetual_positions])
+    total_perpetual = total_perpetual + filled_size
+
+    logger.info(f'Filled {filled_size} in {future_name} | Total: {total_perpetual}')
 
 
 if __name__ == '__main__':
     usage = "usage: " + sys.argv[0] + " <FTX Account Name> <Underlying> [optional-args]"
     parser = OptionParser(usage = usage)
-    parser.add_option("-s", "--sleep",
-                      help="How long to sleep (in seconds) between run cycles", type=int, dest="sleep", default=300)
+    
     parser.add_option("-m", "--margin",
                       help="Margin target", type=float, dest="margin", default=0.2)
     parser.add_option("-l", "--margin-lower",
@@ -188,25 +175,21 @@ if __name__ == '__main__':
     try:
         sm.get_market_spec(underlying + "/USD")
     except:
-        print("Invalid underlying (does not exist in Securities Master database)")
+        logger.exception("Invalid underlying (does not exist in Securities Master database)")
         sys.exit(0)
 
     try:
         sm.get_contract_spec(underlying + '-PERP')
     except:
-        print("No associated perpetual contract at FTX (does not exist in Securities Master database)")
+        logger.exception("No associated perpetual contract at FTX (does not exist in Securities Master database)")
         sys.exit(0)
 
-    ftx_account = FtxAccount(account_name)
-    ftx_feed = FtxExchangeFeed(account_name)
+    try:
+        ftx_account = FtxAccount(account_name)
+        ftx_feed = FtxExchangeFeed(account_name)
+    except Exception as e:
+        logger.exception(e)
+        sys.exit(0)
 
-    cash_and_carry = FtxStaticCashAndCarryPerpetual(ftx_account, ftx_feed, underlying, 
+    static_cash_and_carry(ftx_account, ftx_feed, underlying, 
                             options.margin, (options.margin_low, options.margin_high))
-    
-    while True:
-        start = time.time()
-        logger.info(f"Running {underlying} static cash + carry trade")
-        cash_and_carry.run()
-        end = time.time()
-        logger.info(f"Going to sleep for {options.sleep - (end - start)}s")
-        time.sleep(options.sleep - (end - start))

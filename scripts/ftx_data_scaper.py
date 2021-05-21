@@ -163,45 +163,28 @@ def _update_funding_rates(perpetual: str):
         if last_funding_rate_update:
             db_market.lastFundingRateUpdate = last_funding_rate_update
 
+
 if __name__ == '__main__':
-
-    parser = argparse.ArgumentParser(description='Update FTX database.')
-    parser.add_argument('--sleep', dest='sleep', action='store', default=600,
-                        help='How long to sleep between refresh cycles')
-
-    args = parser.parse_args()
 
     ftx_client = ftx.FtxClient()
 
-    while True:
-        start = time.time()
-        logger.info("Starting scraping process...")
+    # get all the futures contracts and add/update their contract
+    # definitions in our database
+    try:
+        markets = ftx_client.get_markets()
+        logger.info("Updating markets and prices")
+        parallel.lmap(_update, markets)
 
-        # get all the futures contracts and add/update their contract
-        # definitions in our database
-    
-        try:
-            markets = ftx_client.get_markets()
-            logger.info("Updating markets and prices")
-            parallel.lmap(_update, markets)
+        # figure out which contracts are perpetuals so we can 
+        # get their related funding rates
+        perpetuals = [market['name'] for market in 
+                            filter(lambda market: '-PERP' in market['name'], markets)]
+        logger.info("Updating funding rates")
+        parallel.lmap(_update_funding_rates, perpetuals)
 
-            # figure out which contracts are perpetuals so we can 
-            # get their related funding rates
-            perpetuals = [market['name'] for market in 
-                                filter(lambda market: '-PERP' in market['name'], markets)]
-            logger.info("Updating funding rates")
-            parallel.lmap(_update_funding_rates, perpetuals)
+    except Exception as e:
+        logger.exception(str(e))
+        raise
 
-        except Exception as e:
-            logger.exception("Exception – " + str(e))
-            # TODO: Handle connection issues?
-            pass
 
-        logger.info("Going to sleep...")
-        end = time.time()
-
-        # sleep until it's time to run again
-        time.sleep(max(0, args.sleep - (end - start)))
-
-    Session.remove()
     
