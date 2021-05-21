@@ -50,80 +50,79 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
     logger.info(f'Current Margin | ' + '{:.2%}'.format(margin_pct))
 
     # if we're within our collateral bounds, do nothing
-    if margin_pct > cash_collateral_bounds[0] and margin_pct < cash_collateral_bounds[1]:
-        return
+    if margin_pct < cash_collateral_bounds[0] or margin_pct > cash_collateral_bounds[1]:
 
-    logger.info('Margin Target Out of Bounds (' + '{:.2%}'.format(cash_collateral_bounds[0]) + ', ' + 
-                                                '{:.2%}'.format(cash_collateral_bounds[1]) + ')')
+        logger.info('Margin Target Out of Bounds (' + '{:.2%}'.format(cash_collateral_bounds[0]) + ', ' + 
+                                                    '{:.2%}'.format(cash_collateral_bounds[1]) + ')')
 
-    # otherwise, figure out what our target positions are
-    target_margin_usd = portfolio_value * cash_collateral_target
-    target_exposure_usd = portfolio_value * (1 - cash_collateral_target)
+        # otherwise, figure out what our target positions are
+        target_margin_usd = portfolio_value * cash_collateral_target
+        target_exposure_usd = portfolio_value * (1 - cash_collateral_target)
 
-    current_exposure_usd = sum([position.usd_value for position in underlying_positions])
+        current_exposure_usd = sum([position.usd_value for position in underlying_positions])
 
-    target_usd_trade = target_exposure_usd - current_exposure_usd
+        target_usd_trade = target_exposure_usd - current_exposure_usd
 
-    # we do the trade in the underlying first because we're trying to hit a specific
-    # dollar amount; once we get that dollar amount executed, we can match it with
-    # a corresponding trade in the perpetuals
-    with execution_scope() as session:
-        side = 'buy' if target_usd_trade > 1e-8 else 'sell'
+        # we do the trade in the underlying first because we're trying to hit a specific
+        # dollar amount; once we get that dollar amount executed, we can match it with
+        # a corresponding trade in the perpetuals
+        with execution_scope() as session:
+            side = 'buy' if target_usd_trade > 1e-8 else 'sell'
 
-        target_usd_trade = abs(target_usd_trade)
-        logger.info(f'{side.upper()} ${target_usd_trade} {underlying_name}')
-        underlying_order = MarketOrderDollars(account = account,
-                                                exchange_feed = exchange_feed,
-                                                market = underlying_name,
-                                                side = side,
-                                                size_usd = target_usd_trade)
+            target_usd_trade = abs(target_usd_trade)
+            logger.info(f'{side.upper()} ${target_usd_trade} {underlying_name}')
+            underlying_order = MarketOrderDollars(account = account,
+                                                    exchange_feed = exchange_feed,
+                                                    market = underlying_name,
+                                                    side = side,
+                                                    size_usd = target_usd_trade)
 
-        session.add(underlying_order)
+            session.add(underlying_order)
 
-    order_status = session.get_order_statuses()
-    if len(order_status) == 0:
-        # the order errored out
-        logger.info(f'{side.upper()} ${target_usd_trade} {underlying_name} FAILED')
-        return
-    else:
-        order_status = order_status[0]
+        order_status = session.get_order_statuses()
+        if len(order_status) == 0:
+            # the order errored out
+            logger.info(f'{side.upper()} ${target_usd_trade} {underlying_name} FAILED')
+        else:
+            order_status = order_status[0]
 
-    # figure out how much of the order was actually filled
-    filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
-    total_underlying = sum([position.net_size for position in underlying_positions])
-    total_underlying = total_underlying + filled_size
+            # figure out how much of the order was actually filled
+            filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
+            underlying_size = underlying_size + filled_size
 
-    logger.info(f'Filled {filled_size} in {underlying_name} | Total: {total_underlying}')
+            logger.info(f'Filled {filled_size} in {underlying_name} | Total: {underlying_size}')
+
 
     # if we have 5 underlying, we need -5 perpetuals
     # so we want to take that target and subtract what we already own
-    perpetual_to_buy = (-total_underlying - perpetual_size)
+    perpetual_to_buy = (-underlying_size - perpetual_size)
     perpetual_to_buy = int(perpetual_to_buy / minimum_size) * minimum_size
 
-    with execution_scope() as session:
-        side = 'buy' if perpetual_to_buy > 1e-8 else 'sell'
-        size = abs(perpetual_to_buy)
-        logger.info(f"{side.upper()} {size} {future_name}")
-        perpetual_order = MarketOrder(account = account,
-                            market = future_name,
-                            side = side,
-                            size = size)
-    
-        session.add(perpetual_order)
+    if abs(perpetual_to_buy) > minimum_size:
+        with execution_scope() as session:
+            side = 'buy' if perpetual_to_buy > 1e-8 else 'sell'
+            size = abs(perpetual_to_buy)
+            logger.info(f"{side.upper()} {size} {future_name}")
+            perpetual_order = MarketOrder(account = account,
+                                market = future_name,
+                                side = side,
+                                size = size)
+        
+            session.add(perpetual_order)
 
-    order_status = session.get_order_statuses()
-    if len(order_status) == 0:
-        # the order errored out
-        logger.info(f'{side.upper()} {size} {future_name} FAILED')
-        return
-    else:
-        order_status = order_status[0]
+        order_status = session.get_order_statuses()
+        if len(order_status) == 0:
+            # the order errored out
+            logger.info(f'{side.upper()} {size} {future_name} FAILED')
+            return
+        else:
+            order_status = order_status[0]
 
-    filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
-    total_perpetual = sum([position.net_size for position in perpetual_positions])
-    total_perpetual = total_perpetual + filled_size
+        filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
+        total_perpetual = sum([position.net_size for position in perpetual_positions])
+        total_perpetual = total_perpetual + filled_size
 
-    logger.info(f'Filled {filled_size} in {future_name} | Total: {total_perpetual}')
+        logger.info(f'Filled {filled_size} in {future_name} | Total: {total_perpetual}')
 
 
 if __name__ == '__main__':

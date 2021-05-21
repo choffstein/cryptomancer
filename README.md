@@ -29,11 +29,11 @@ For code relying upon the `cryptomancer.security_master` module, a postgresql se
 
 ```json
 {
-    "SQL_URL":  "url.com",
-    "SQL_PORT": "5432",
-    "SQL_DB": "db_name",
-    "SQL_USER": "db_user",
-    "SQL_PASSWORD": "db_password"
+    "SQL_URL":  "YOUR-SQL-URL",
+    "SQL_PORT": "PORT",
+    "SQL_DB": "DATABASE-NAME",
+    "SQL_USER": "USER-NAME",
+    "SQL_PASSWORD": "PASSWORD"
 }
 ```
 
@@ -55,9 +55,9 @@ First, set up an account and subaccount at FTX.  Set up a corresponding API key 
 
 ```json
 {
-    "API_KEY": "your_api_key",
-    "API_SECRET": "your_secret_key",
-    "SUBACCOUNT": "SUBACCOUNT_1"
+    "API_KEY": "YOUR-API-KEY",
+    "API_SECRET": "YOUR-SECRET-KEY",
+    "SUBACCOUNT": "SUBACCOUNT-NAME"
 }
 ```
 
