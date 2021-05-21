@@ -8,6 +8,7 @@ cryptomancer is a Python library for automating cryto trades.
 
                    USE AT YOUR OWN RISK
 
+```
                      .ed"""" """$$$$be.
                    -"           ^""**$$$e.
                  ."                   '$$$c
@@ -22,7 +23,7 @@ cryptomancer is a Python library for automating cryto trades.
 4$$$$L        $$P"  "$$b   .$ $$$$$...e$$        .=  e$$$.
 ^*$$$$$c  %..   *c    ..    $$ 3$$$$$$$$$$eF     zP  d$$$$$
   "**$$$ec   "   %ce""    $$$  $$$$$$$$$$*    .r" =$$$$P""
-        "*$b.  "c  *$e.    $$$ d$$$$$"L$$    .d"  e$$***"
+        "*$b.  "c  *$e.    *** d$$$$$"L$$    .d"  e$$***"
           ^*$$c ^$c $$$      4J$$$$$% $$$ .e*".eeP"
              "$$$$$$"'$=e....$*$$**$cz$$" "..d$*"
                "*$$$  *=%4.$ L L$ P3$$$F $$$P"
@@ -39,6 +40,7 @@ cryptomancer is a Python library for automating cryto trades.
         ^*$E")$..$"                         *   .ee==d%
            $.d$$$*                           *  J$$$e*
             """""                              "$$$"
+```
 
 ## Installation
 
