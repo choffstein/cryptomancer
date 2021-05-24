@@ -38,8 +38,9 @@ class AutoLimitOrder(Order):
                 status = self.get_status()
                 filled_size = filled_size + status.filled_size
 
-                if not numpy.isclose(filled_size, self._size):
-                    # make sure the status filled size reflects the full fill status
+                # have we filled our whole order?
+                if numpy.isclose(filled_size, self._size):
+                    # make sure the status filled size reflects the full fill size
                     status.filled_size = self._size
                     continue
 
