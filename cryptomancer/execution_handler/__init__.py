@@ -1,5 +1,9 @@
-from cryptomancer.account import Account
-from cryptomancer.exchange_feed import ExchangeFeed
+from typing import TYPE_CHECKING
+
+# this is necessary to avoid a circular import issue with Account and OrderStatus
+if TYPE_CHECKING:
+    from cryptomancer.account import Account
+    from cryptomancer.exchange_feed import ExchangeFeed
 
 from cryptomancer.execution_handler.execution_session import ExecutionSession
 from cryptomancer.execution_handler.order_status import OrderStatus
@@ -19,7 +23,7 @@ def session_required(fn):
 
 
 class Order:
-    def __init__(self, account: Account, exchange_feed: ExchangeFeed):
+    def __init__(self, account: 'Account', exchange_feed: 'ExchangeFeed'):
         self._account = account
         self._exchange_feed = exchange_feed
         self._session = None

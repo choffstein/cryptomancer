@@ -50,7 +50,7 @@ class MarketOrder(Order):
             pass            
 
         order_status = self.get_status()
-        filled = order_status.size_filled
+        filled = order_status.filled_size
 
         if filled > 1e-8:
             side = "buy" if self._side == "sell" else "sell"

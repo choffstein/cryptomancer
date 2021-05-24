@@ -49,11 +49,23 @@ class FtxAccount(Account):
 
         return positions
 
-    def get_open_orders(self, market: Optional[str] = None) -> List[dict]:
-        return self.account.get_open_orders(market = market)
+    def get_open_orders(self, market: Optional[str] = None) -> List[OrderStatus]:
+        open_orders = self.account.get_open_orders(market = market)
+        order_statuses = []
+        for order_status in open_orders:
+            os = OrderStatus(order_id = order_status['id'],
+                            created_time = pandas.Timestamp(order_status['createdAt']).to_pydatetime(),
+                            market = order_status['market'],
+                            side = order_status['side'],
+                            size = order_status['size'],
+                            filled_size = order_status['filledSize'],
+                            status = order_status['status'])
 
-    def place_order(self, market: str, side: str, price: float, size: float, type: str = 'limit', reduce_only: bool = False, ioc: bool = False, post_only: bool = False, client_id: Optional[str] = None) -> dict:
-        
+            order_statuses.append(os)
+
+        return order_statuses
+
+    def place_order(self, market: str, side: str, price: float, size: float, type: str = 'limit', reduce_only: bool = False, ioc: bool = False, post_only: bool = False, client_id: Optional[str] = None) -> OrderStatus:
         order_status = self.account.place_order(market = market, side = side, price = price, size = size, type = type, 
                                  reduce_only = reduce_only, ioc = ioc, post_only = post_only, client_id = client_id)
         
@@ -65,11 +77,21 @@ class FtxAccount(Account):
                             filled_size = order_status['filledSize'],
                             status = order_status['status'])
 
+    def modify_order(self, order_id: str, price: Optional[float], size: Optional[float] = None) -> OrderStatus:
+        order_status = self.account.modify_order(order_id, price = price, size = size)
+
+        return OrderStatus(order_id = order_status['id'],
+                            created_time = pandas.Timestamp(order_status['createdAt']).to_pydatetime(),
+                            market = order_status['market'],
+                            side = order_status['side'],
+                            size = order_status['size'],
+                            filled_size = order_status['filledSize'],
+                            status = order_status['status'])
 
     def cancel_order(self, order_id: str) -> dict:
         return self.account.cancel_order(order_id = order_id)
 
-    def get_order_status(self, order_id: str) -> dict:
+    def get_order_status(self, order_id: str) -> OrderStatus:
         order_status = self.account.get_order_status(existing_order_id = order_id)
         return OrderStatus(order_id = order_status['id'],
                             created_time = pandas.Timestamp(order_status['createdAt']).to_pydatetime(),

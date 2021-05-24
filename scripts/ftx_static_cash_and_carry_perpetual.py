@@ -13,6 +13,7 @@ from cryptomancer.account.ftx_account import FtxAccount
 from cryptomancer.exchange_feed.ftx_exchange_feed import FtxExchangeFeed
 
 from cryptomancer.execution_handler.execution_session import execution_scope
+
 from cryptomancer.execution_handler.market_order_dollars import MarketOrderDollars
 from cryptomancer.execution_handler.market_order import MarketOrder
 
@@ -28,7 +29,7 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
 
     for position in positions:
         logger.info(f'Current Position | {position.name} | {position.side} | {position.size} | ${position.usd_value}')
-    
+
     usd_coins = list(filter(lambda position: position.name == 'USD', positions))
     underlying_positions = list(filter(lambda position: position.name.upper() == underlying, positions))
     perpetual_positions = list(filter(lambda position: position.name.upper() == future_name, positions))
@@ -44,6 +45,9 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
     usd_value = sum([position.usd_value for position in usd_coins])
     underlying_size = sum([position.net_size for position in underlying_positions])
     perpetual_size = sum([position.net_size for position in perpetual_positions])
+
+    # SHOULD THE LOGIC HERE ACCOUNT FOR TARGET POSITION VS CURRENT POSITION
+    # e.g. WHAT DO WE DO WITH OTHER COINS / PERPS IN THE ACCOUNT?!  LIQUIDATE?
 
     margin_pct = usd_value / portfolio_value
 
