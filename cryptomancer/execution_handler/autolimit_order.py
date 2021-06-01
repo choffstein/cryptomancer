@@ -66,8 +66,9 @@ class AutoLimitOrder(Order):
 
             try:
                 # assuming we still have more to fill, enter a new limit order
+                size_remaining = (self._size - filled_size)
                 status = account.place_order(market = self._market, side = self._side, price = limit_price, 
-                                size = self._size - filled_size, type = "limit", ioc = False)
+                                size = size_remaining, type = "limit", ioc = False)
                 self.set_id(status.order_id)
             
                 # Zzz...
@@ -112,5 +113,4 @@ class AutoLimitOrder(Order):
             status = account.place_order(market = self._market, side = side, price = None, 
                                     size = filled, type = "market", ioc = True)
             self.set_id(status.order_id)
-
             self.wait_until_closed()

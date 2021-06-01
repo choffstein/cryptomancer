@@ -30,12 +30,12 @@ class WebsocketManager:
 
         self.ws = WebSocketApp(
             self._get_url(),
-            on_message=self._wrap_callback(self._on_message),
-            on_close=self._wrap_callback(self._on_close),
-            on_error=self._wrap_callback(self._on_error),
+            on_message = self._wrap_callback(self._on_message),
+            on_close = self._wrap_callback(self._on_close),
+            on_error = self._wrap_callback(self._on_error),
         )
 
-        wst = Thread(target=self._run_websocket, args=(self.ws,))
+        wst = Thread(target = self._run_websocket, args=(self.ws,))
         wst.daemon = True
         wst.start()
 

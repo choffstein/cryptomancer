@@ -8,15 +8,17 @@ from cryptomancer.account import Account
 from cryptomancer.exchange_feed import ExchangeFeed
 
 
-class MarketOrderDollars(Order):
+class LimitOrderDollars(Order):
     def __init__(self, account: Account, exchange_feed: ExchangeFeed, 
-                 market: str, side: str, size_usd: float, attempts: Optional[int] = 5):
+                 market: str, side: str, size_usd: float, 
+                 attempts: Optional[int] = 5, width: Optional[float] = 0.001):
         super().__init__(account, exchange_feed)
         self._market = market
         self._side = side
         self._size_usd = size_usd
         self._size = None
         self._attempts = attempts
+        self._width = width
 
     @session_required
     def submit(self) -> dict:
@@ -31,9 +33,9 @@ class MarketOrderDollars(Order):
                 underlying_market = self._exchange_feed.get_ticker(self._market)
                 
                 if self._side == 'buy':
-                    target_underlying_px = underlying_market['ask']
+                    target_underlying_px = underlying_market['ask'] * (1. + self._width)
                 else:
-                    target_underlying_px = underlying_market['bid']
+                    target_underlying_px = underlying_market['bid'] * (1. - self._width)
                 
                 break
 
@@ -49,8 +51,8 @@ class MarketOrderDollars(Order):
         self._size = self._size_usd / target_underlying_px
 
         try:
-            status = account.place_order(market = self._market, side = self._side, price = None, 
-                                    size = self._size, type = "market", ioc = True)
+            status = account.place_order(market = self._market, side = self._side, price = target_underlying_px, 
+                                    size = self._size, type = "limit", ioc = True)
         
         except:
             status = OrderStatus(order_id = -1,

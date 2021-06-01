@@ -14,8 +14,8 @@ from cryptomancer.exchange_feed.ftx_exchange_feed import FtxExchangeFeed
 
 from cryptomancer.execution_handler.execution_session import execution_scope
 
-from cryptomancer.execution_handler.market_order_dollars import MarketOrderDollars
-from cryptomancer.execution_handler.market_order import MarketOrder
+from cryptomancer.execution_handler.limit_order_dollars import LimitOrderDollars
+from cryptomancer.execution_handler.limit_order import LimitOrder
 
 
 def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, underlying: str, 
@@ -75,7 +75,7 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
 
             target_usd_trade = abs(target_usd_trade)
             logger.info(f'{side.upper()} ${target_usd_trade} {underlying_name}')
-            underlying_order = MarketOrderDollars(account = account,
+            underlying_order = LimitOrderDollars(account = account,
                                                     exchange_feed = exchange_feed,
                                                     market = underlying_name,
                                                     side = side,
@@ -107,7 +107,7 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
             side = 'buy' if perpetual_to_buy > 1e-8 else 'sell'
             size = abs(perpetual_to_buy)
             logger.info(f"{side.upper()} {size} {future_name}")
-            perpetual_order = MarketOrder(account = account,
+            perpetual_order = LimitOrder(account = account,
                                 market = future_name,
                                 side = side,
                                 size = size)
@@ -167,21 +167,21 @@ if __name__ == '__main__':
 
     account_name = args[0]
     underlying = args[1].upper()
-
-    args = parser.parse_args()
     
     sm = SecurityMaster("FTX")
     try:
-        sm.get_market_spec(underlying + "/USD")
+        market_spec = sm.get_market_spec(underlying + "/USD")
     except:
         logger.exception("Invalid underlying (does not exist in Securities Master database)")
         sys.exit(0)
 
     try:
-        sm.get_contract_spec(underlying + '-PERP')
+        contract_spec = sm.get_contract_spec(underlying + '-PERP')
     except:
         logger.exception("No associated perpetual contract at FTX (does not exist in Securities Master database)")
         sys.exit(0)
+
+    min_size = max(market_spec['sizeIncrement'], contract_spec['sizeIncrement'])
 
     try:
         ftx_account = FtxAccount(account_name)
@@ -191,4 +191,6 @@ if __name__ == '__main__':
         sys.exit(0)
 
     static_cash_and_carry(ftx_account, ftx_feed, underlying, 
-                            options.margin, (options.margin_low, options.margin_high))
+                            cash_collateral_target = options.margin, 
+                            cash_collateral_bounds = (options.margin_low, options.margin_high),
+                            minimum_size = min_size)

@@ -7,12 +7,23 @@ from cryptomancer.exchange_feed.ftx_wsocket_client import FtxWebsocketClient
 class FtxExchangeFeed(ExchangeFeed):
     def __init__(self, account_name: Optional[str] = None):
         self.wsocket_client = FtxWebsocketClient(account_name)
-        
-    def orderbook(self, market: str) -> Dict[str, List[Tuple[float, float]]]:
-        ob = self.wsocket_client.get_orderbook(market)
-        return ob
 
-    def cumulative_orderbook(self, market: str) -> Dict[str, List[Tuple[float, float]]]:
+    def get_orders(self) -> Dict[int, Dict]:
+        return self.wsocket_client.get_orders()
+
+    def get_fills(self) -> List[Dict]:
+        return self.wsocket_client.get_fills()
+
+    def get_bid_offer(self, market: str) -> List[Dict]:
+        return self.wsocket_client.get_trades(market)
+
+    def get_ticker(self, market: str) -> Dict:
+        return self.wsocket_client.get_ticker(market)
+
+    def get_orderbook(self, market: str) -> Dict[str, List[Tuple[float, float]]]:
+        return self.wsocket_client.get_orderbook(market)
+        
+    def get_cumulative_orderbook(self, market: str) -> Dict[str, List[Tuple[float, float]]]:
         ob = self.orderbook(market)
 
         bids = ob['bids']
@@ -34,7 +45,3 @@ class FtxExchangeFeed(ExchangeFeed):
         ob['asks'] = list(zip(ask_x, ask_y))
 
         return ob
-
-    def get_current_market(self, market: str) -> Dict:
-        m = self.wsocket_client.get_ticker(market)
-        return m
