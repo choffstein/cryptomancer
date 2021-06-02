@@ -18,7 +18,6 @@ class TrailingStopOrder(Order):
         self._size = size
         self._attempts = attempts
         self._width = width
-        self._reduce_only = reduce_only
         self._kwargs = kwargs
 
     @session_required

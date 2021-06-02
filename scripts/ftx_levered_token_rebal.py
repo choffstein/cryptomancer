@@ -20,6 +20,7 @@ from cryptomancer.account.ftx_account import FtxAccount
 from cryptomancer.exchange_feed.ftx_exchange_feed import FtxExchangeFeed
 from cryptomancer.execution_handler.execution_session import execution_scope
 from cryptomancer.execution_handler.limit_order import LimitOrder
+from cryptomancer.execution_handler.trailing_stop_order import TrailingStopOrder
 
 
 def run(args):
@@ -117,6 +118,7 @@ def run(args):
         filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
         logger.info(f'{base} | Filled {filled_size} in {underlying}')
     
+    """
     # start at 00:02:20
     # 2nd trade is at 00:02:40
     # 3rd+ trade is every 10s after
@@ -129,17 +131,20 @@ def run(args):
     time.sleep(max_time)
 
     logger.info(f'{base} | Done sleeping; liquidating.')
+    """
 
     size = abs(filled_size)
     with execution_scope() as session:
         side = 'sell' if underlying_to_rebal > 1e-8 else 'buy'
     
         logger.info(f'{base} | {side.upper()} {size}')
-        underlying_order = LimitOrder(account = account,
+        underlying_order = TrailingStopOrder(account = account,
                                         exchange_feed = exchange_feed,
                                         market = underlying,
                                         side = side,
-                                        size = size)
+                                        size = size,
+                                        width = 0.001,       # give it 10bps of width
+                                        reduce_only = True) 
         session.add(underlying_order)
 
     order_status = session.get_order_statuses()
