@@ -10,13 +10,14 @@ from cryptomancer.exchange_feed import ExchangeFeed
 
 class MarketOrderDollars(Order):
     def __init__(self, account: Account, exchange_feed: ExchangeFeed, 
-                 market: str, side: str, size_usd: float, attempts: Optional[int] = 5):
+                 market: str, side: str, size_usd: float, attempts: Optional[int] = 5, **kwargs):
         super().__init__(account, exchange_feed)
         self._market = market
         self._side = side
         self._size_usd = size_usd
         self._size = None
         self._attempts = attempts
+        self._kwargs = kwargs
 
     @session_required
     def submit(self) -> dict:
@@ -50,7 +51,7 @@ class MarketOrderDollars(Order):
 
         try:
             status = account.place_order(market = self._market, side = self._side, price = None, 
-                                    size = self._size, type = "market", ioc = True)
+                                    size = self._size, type = "market", **self._kwargs)
         
         except:
             status = OrderStatus(order_id = -1,

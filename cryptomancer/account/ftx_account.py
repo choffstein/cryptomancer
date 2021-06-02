@@ -65,10 +65,31 @@ class FtxAccount(Account):
 
         return order_statuses
 
-    def place_order(self, market: str, side: str, price: float, size: float, type: str = 'limit', reduce_only: bool = False, ioc: bool = False, post_only: bool = False, client_id: Optional[str] = None) -> OrderStatus:
+    def place_order(self, market: str, side: str, price: float, size: float, type: str = 'limit', reduce_only: bool = False, 
+                        ioc: bool = False, post_only: bool = False, client_id: Optional[str] = None) -> OrderStatus:
+                        
         order_status = self.account.place_order(market = market, side = side, price = price, size = size, type = type, 
                                  reduce_only = reduce_only, ioc = ioc, post_only = post_only, client_id = client_id)
         
+        return OrderStatus(order_id = order_status['id'],
+                            created_time = pandas.Timestamp(order_status['createdAt']).to_pydatetime(),
+                            market = order_status['market'],
+                            side = order_status['side'],
+                            size = order_status['size'],
+                            filled_size = order_status['filledSize'],
+                            status = order_status['status'])
+
+
+    def place_conditional_order(self, market: str, side: str, size: float, type: str = 'limit', limit_price: Optional[float] = None, 
+                                reduce_only: bool = False, cancel: bool = False, trigger_price: Optional[float] = None,
+                                trail_value: Optional[float] = None) -> OrderStatus:
+
+        order_status = self.account.place_conditional_order(market = market, side = side, size = size, type = type,
+                                limit_price = limit_price, reduce_only = reduce_only, cancel = cancel,
+                                trigger_price = trigger_price, trail_value = trail_value)
+
+        import ipdb; ipdb.set_trace()
+
         return OrderStatus(order_id = order_status['id'],
                             created_time = pandas.Timestamp(order_status['createdAt']).to_pydatetime(),
                             market = order_status['market'],

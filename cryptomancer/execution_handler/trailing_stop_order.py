@@ -7,19 +7,18 @@ from cryptomancer.execution_handler.order_status import OrderStatus
 from cryptomancer.account import Account
 from cryptomancer.exchange_feed import ExchangeFeed
 
-
-class LimitOrderDollars(Order):
+class TrailingStopOrder(Order):
     def __init__(self, account: Account, exchange_feed: ExchangeFeed, 
-                 market: str, side: str, size_usd: float, 
-                 attempts: Optional[int] = 5, width: Optional[float] = 0.001,
-                 **kwargs):
+                    market: str, side: str, size: float, 
+                    attempts: Optional[int] = 5, width: Optional[float] = 0.001,
+                    **kwargs):
         super().__init__(account, exchange_feed)
         self._market = market
         self._side = side
-        self._size_usd = size_usd
-        self._size = None
+        self._size = size
         self._attempts = attempts
         self._width = width
+        self._reduce_only = reduce_only
         self._kwargs = kwargs
 
     @session_required
@@ -33,12 +32,8 @@ class LimitOrderDollars(Order):
         for attempt in range(self._attempts):
             try:
                 underlying_market = self._exchange_feed.get_ticker(self._market)
-                
-                if self._side == 'buy':
-                    target_underlying_px = underlying_market['ask'] * (1. + self._width)
-                else:
-                    target_underlying_px = underlying_market['bid'] * (1. - self._width)
-                
+                mid_price = (underlying_market['ask'] + underlying_market['bid']) / 2
+                trail_value = mid_price * self._width
                 break
 
             except:
@@ -50,11 +45,13 @@ class LimitOrderDollars(Order):
             # we failed all attempts (didn't break from loop)
             raise Exception("Exchange feed issue")
 
-        self._size = self._size_usd / target_underlying_px
 
         try:
-            status = account.place_order(market = self._market, side = self._side, price = target_underlying_px, 
-                                    size = self._size, type = "limit", **self._kwargs)
+            if self._side = 'sell':
+                trail_value = -trail_value
+
+            status = account.place_conditional_order(market = self._market, side = self._side size = self._size, type = 'trailingStop', 
+                                trail_value = trail_value, **self._kwargs)
         
         except:
             status = OrderStatus(order_id = -1,
@@ -69,9 +66,10 @@ class LimitOrderDollars(Order):
         self.set_id(status.order_id)
         return status
 
+
     @session_required
     def rollback(self):
-        if not self.get_id() or self.failed():
+        if not self.get_id():
             return
 
         try:
@@ -81,7 +79,7 @@ class LimitOrderDollars(Order):
             pass            
 
         order_status = self.get_status()
-        filled = order_status.size_filled
+        filled = order_status.filled_size
 
         if filled > 1e-8:
             side = "buy" if self._side == "sell" else "sell"
@@ -91,4 +89,3 @@ class LimitOrderDollars(Order):
             self.set_id(status.order_id)
 
             self.wait_until_closed()
-

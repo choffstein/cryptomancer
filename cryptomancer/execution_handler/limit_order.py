@@ -10,13 +10,15 @@ from cryptomancer.exchange_feed import ExchangeFeed
 class LimitOrder(Order):
     def __init__(self, account: Account, exchange_feed: ExchangeFeed, 
                     market: str, side: str, size: float, 
-                    attempts: Optional[int] = 5, width: Optional[float] = 0.001):
+                    attempts: Optional[int] = 5, width: Optional[float] = 0.001,
+                    **kwargs):
         super().__init__(account, exchange_feed)
         self._market = market
         self._side = side
         self._size = size
         self._attempts = attempts
         self._width = width
+        self._kwargs = kwargs
 
     @session_required
     def submit(self) -> dict:
@@ -29,7 +31,7 @@ class LimitOrder(Order):
         for attempt in range(self._attempts):
             try:
                 underlying_market = self._exchange_feed.get_ticker(self._market)
-                
+
                 if self._side == 'buy':
                     target_underlying_px = underlying_market['ask'] * (1. + self._width)
                 else:
@@ -49,7 +51,7 @@ class LimitOrder(Order):
 
         try:
             status = account.place_order(market = self._market, side = self._side, price = target_underlying_px, 
-                                    size = self._size, type = "limit", ioc = True)
+                                    size = self._size, type = "limit", **self._kwargs)
         
         except:
             status = OrderStatus(order_id = -1,

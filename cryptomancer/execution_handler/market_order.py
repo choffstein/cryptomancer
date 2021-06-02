@@ -8,11 +8,12 @@ from cryptomancer.account import Account
 
 
 class MarketOrder(Order):
-    def __init__(self, account: Account, market: str, side: str, size: float):
+    def __init__(self, account: Account, market: str, side: str, size: float, **kwargs):
         super().__init__(account, None)
         self._market = market
         self._side = side
         self._size = size
+        self._kwargs = kwargs
 
     @session_required
     def submit(self) -> dict:
@@ -22,7 +23,7 @@ class MarketOrder(Order):
         account = self.get_account()
         try:
             status = account.place_order(market = self._market, side = self._side, price = None, 
-                                    size = self._size, type = "market", ioc = True)
+                                    size = self._size, type = "market", **self._kwargs)
         
         except:
             status = OrderStatus(order_id = -1,

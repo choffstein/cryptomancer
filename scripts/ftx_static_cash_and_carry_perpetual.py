@@ -108,6 +108,7 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
             size = abs(perpetual_to_buy)
             logger.info(f"{side.upper()} {size} {future_name}")
             perpetual_order = LimitOrder(account = account,
+                                exchange_feed = exchange_feed,
                                 market = future_name,
                                 side = side,
                                 size = size)

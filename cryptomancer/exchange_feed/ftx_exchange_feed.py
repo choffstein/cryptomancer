@@ -14,7 +14,7 @@ class FtxExchangeFeed(ExchangeFeed):
     def get_fills(self) -> List[Dict]:
         return self.wsocket_client.get_fills()
 
-    def get_bid_offer(self, market: str) -> List[Dict]:
+    def get_trades(self, market: str) -> List[Dict]:
         return self.wsocket_client.get_trades(market)
 
     def get_ticker(self, market: str) -> Dict:

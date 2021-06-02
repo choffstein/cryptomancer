@@ -122,7 +122,9 @@ class FtxWebsocketClient(WebsocketManager):
         if subscription not in self._subscriptions:
             self._subscribe(subscription)
 
-        return list(self._trades[market].copy())
+        trades = list(self._trades[market].copy())
+        self._trades[market].clear()
+        return trades
 
 
     def get_orderbook(self, market: str) -> Dict[str, List[Tuple[float, float]]]:
