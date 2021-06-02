@@ -88,8 +88,7 @@ class FtxAccount(Account):
                                 limit_price = limit_price, reduce_only = reduce_only, cancel = cancel,
                                 trigger_price = trigger_price, trail_value = trail_value)
 
-        import ipdb; ipdb.set_trace()
-
+        print(order_status)
         return OrderStatus(order_id = order_status['id'],
                             created_time = pandas.Timestamp(order_status['createdAt']).to_pydatetime(),
                             market = order_status['market'],

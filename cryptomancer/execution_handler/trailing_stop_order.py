@@ -49,7 +49,7 @@ class TrailingStopOrder(Order):
             if self._side == 'sell':
                 trail_value = -trail_value
 
-            status = account.place_conditional_order(market = self._market, side = self._side size = self._size, type = 'trailingStop', 
+            status = account.place_conditional_order(market = self._market, side = self._side, size = self._size, type = 'trailing_stop', 
                                 trail_value = trail_value, **self._kwargs)
         
         except:
