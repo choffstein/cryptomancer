@@ -12,6 +12,8 @@ from typing import Optional
 
 from functools import wraps
 
+import time
+
 def session_required(fn):
     @wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -47,7 +49,6 @@ class Order:
     def failed(self):
         return self._id == -1
 
-    @session_required
     def cancel(self) -> dict:
         if not self.get_id():
             raise Exception("Cannot cancel non-executed order.")
@@ -58,15 +59,12 @@ class Order:
         account = self.get_account()
         return account.cancel_order(self.get_id())
 
-    @session_required
     def is_pending(self) -> bool:
         return (self.get_id() is None)
 
-    @session_required
     def is_submitted(self) -> bool:
         return not self.is_pending()
 
-    @session_required
     def is_closed(self) -> bool:
         if not self.get_id():
             raise Exception("Cannot poll non-executed order.")
@@ -77,7 +75,6 @@ class Order:
         order_status = self.get_status()
         return (order_status.status == 'closed')
 
-    @session_required
     def wait_until_closed(self):
         while True:
             if self.is_closed():
@@ -85,7 +82,6 @@ class Order:
             # TODO: Better sleep method
             time.sleep(1)
 
-    @session_required 
     def get_status(self) -> dict:
         if not self.get_id():
             raise Exception("Cannot poll non-executed order.")

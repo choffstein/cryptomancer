@@ -14,8 +14,8 @@ from cryptomancer.exchange_feed.ftx_exchange_feed import FtxExchangeFeed
 
 from cryptomancer.execution_handler.execution_session import execution_scope
 
-from cryptomancer.execution_handler.limit_order_dollars import LimitOrderDollars
-from cryptomancer.execution_handler.limit_order import LimitOrder
+from cryptomancer.execution_handler.auto_limit_order_dollars import AutoLimitOrderDollars
+from cryptomancer.execution_handler.auto_limit_order import AutoLimitOrder
 
 
 def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, underlying: str, 
@@ -75,7 +75,7 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
 
             target_usd_trade = abs(target_usd_trade)
             logger.info(f'{side.upper()} ${target_usd_trade} {underlying_name}')
-            underlying_order = LimitOrderDollars(account = account,
+            underlying_order = AutoLimitOrderDollars(account = account,
                                                     exchange_feed = exchange_feed,
                                                     market = underlying_name,
                                                     side = side,
@@ -107,7 +107,7 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
             side = 'buy' if perpetual_to_buy > 1e-8 else 'sell'
             size = abs(perpetual_to_buy)
             logger.info(f"{side.upper()} {size} {future_name}")
-            perpetual_order = LimitOrder(account = account,
+            perpetual_order = AutoLimitOrder(account = account,
                                 exchange_feed = exchange_feed,
                                 market = future_name,
                                 side = side,

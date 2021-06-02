@@ -211,13 +211,15 @@ class FtxWebsocketClient(WebsocketManager):
 
    
     def _handle_trades_message(self, message: Dict) -> None:
-        self._trades[message['market']].append(message['data'])
+        for trade in message['data']:
+            self._trades[message['market']].append(trade)
     
     def _handle_ticker_message(self, message: Dict) -> None:
         self._tickers[message['market']] = message['data']
     
     def _handle_fills_message(self, message: Dict) -> None:
-        self._fills.append(message['data'])
+        for fill in message['data']:
+            self._fills.append(fill)
     
     def _handle_orders_message(self, message: Dict) -> None:
         data = message['data']

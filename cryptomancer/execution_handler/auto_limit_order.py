@@ -5,17 +5,19 @@ import datetime
 from cryptomancer.execution_handler import Order, session_required
 from cryptomancer.execution_handler.order_status import OrderStatus
 from cryptomancer.account import Account
+from cryptomancer.exchange_feed import ExchangeFeed
 
-
-class LimitOrderDollars(Order):
-    def __init__(self, account: Account, market: str, side: str,
-                    size_usd: float, price: float, **kwargs):
-        super().__init__(account, None)
+class AutoLimitOrder(Order):
+    def __init__(self, account: Account, exchange_feed: ExchangeFeed, 
+                    market: str, side: str, size: float, 
+                    attempts: Optional[int] = 5, width: Optional[float] = 0.001,
+                    **kwargs):
+        super().__init__(account, exchange_feed)
         self._market = market
         self._side = side
-        self._size_usd = size_usd
-        self._size = None
-        self._price = price
+        self._size = size
+        self._attempts = attempts
+        self._width = width
         self._kwargs = kwargs
 
     @session_required
@@ -24,10 +26,31 @@ class LimitOrderDollars(Order):
             raise Exception("Cannot execute already working or finished market order.")
 
         account = self.get_account()
-        self._size = self._size_usd / self._price
+        exchange_feed = self.get_exchange_feed()
+
+        for attempt in range(self._attempts):
+            try:
+                underlying_market = self._exchange_feed.get_ticker(self._market)
+
+                if self._side == 'buy':
+                    target_underlying_px = underlying_market['ask'] * (1. + self._width)
+                else:
+                    target_underlying_px = underlying_market['bid'] * (1. - self._width)
+                
+                break
+
+            except:
+                # weird issue where the first time we subscribe to a websocket we can sometimes get
+                # a {} response; so probably just retry...
+                time.sleep(1)
+                continue
+        else:
+            # we failed all attempts (didn't break from loop)
+            raise Exception("Exchange feed issue")
+
 
         try:
-            status = account.place_order(market = self._market, side = self._side, price = self._price, 
+            status = account.place_order(market = self._market, side = self._side, price = target_underlying_px, 
                                     size = self._size, type = "limit", **self._kwargs)
         
         except:
@@ -43,9 +66,10 @@ class LimitOrderDollars(Order):
         self.set_id(status.order_id)
         return status
 
+
     @session_required
     def rollback(self):
-        if not self.get_id() or self.failed():
+        if not self.get_id():
             return
 
         try:
@@ -55,7 +79,7 @@ class LimitOrderDollars(Order):
             pass            
 
         order_status = self.get_status()
-        filled = order_status.size_filled
+        filled = order_status.filled_size
 
         if filled > 1e-8:
             side = "buy" if self._side == "sell" else "sell"
@@ -65,4 +89,3 @@ class LimitOrderDollars(Order):
             self.set_id(status.order_id)
 
             self.wait_until_closed()
-

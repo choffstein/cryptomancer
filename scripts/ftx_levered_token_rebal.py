@@ -91,7 +91,7 @@ def run(args):
 
     ##### EXECUTE A LIMIT ORDER
     ##### WORTH TRYING TO DO A POST ONLY HERE?
-    with execution_scope() as session:
+    with execution_scope(wait = True) as session:
         side = 'buy' if underlying_to_rebal > 1e-8 else 'sell'
     
         logger.info(f'{base} | {side.upper()} {size}')
@@ -138,7 +138,7 @@ def run(args):
     ##### WITH THE FILLED SIZE, SET A TRAILING STOP SELL 
     ##### TO TRADE ANY MOMENTUM
     size = abs(filled_size)
-    with execution_scope() as session:
+    with execution_scope(wait = True) as session:
         side = 'sell' if underlying_to_rebal > 1e-8 else 'buy'
     
         logger.info(f'{base} | {side.upper()} {size}')

@@ -1,7 +1,16 @@
+##########################
+#
+# Implements the Avellaneda-Stoikov model
+#   - adjustments for maximum / minimum spread values
+#   - adjustments for significant changes in volatility
+# 
+##########################
+
 import sys
 from optparse import OptionParser
 
 from typing import Optional, Tuple
+import datetime
 import time
 
 from loguru import logger
@@ -12,8 +21,13 @@ from cryptomancer.security_master import SecurityMaster
 from cryptomancer.account.ftx_account import FtxAccount
 from cryptomancer.exchange_feed.ftx_exchange_feed import FtxExchangeFeed
 
+from cryptomancer.execution_handler.execution_session import execution_scope
+from cryptomancer.execution_handler.limit_order import LimitOrder
+
 import numpy
 import tqdm
+
+import vectorized
 
 
 if __name__ == '__main__':
@@ -21,15 +35,21 @@ if __name__ == '__main__':
     parser = OptionParser(usage = usage)
     
     parser.add_option("-c", "--calibration-period",
-                      help="EWMA span to calibrate volatility to", type=int, dest="ewma_span", default = 120)
+                      help="EWMA span to calibrate volatility to (# of trades)", type=int, dest="ewma_span", default = 120)
     parser.add_option("-g", "--risk-aversion",
                        help="Inventory risk aversion parameter", type=float, dest="gamma", default = 0.5)
     parser.add_option("-t", "--horizon",
-                       help="Horizon of the trade; defaults to infinite", type=float, dest="T", default = numpy.inf)
+                       help="Horizon of the trade; defaults to 8h", type=float, dest="T", default = 60*60*8)
     parser.add_option("-k", "--liquidity",
                        help="Orderbook liquidity parameter", type=float, dest="k", default = 1.5)
-    parser.add_option("-q", "--qmax",
-                        help = "Multiplier on size that defines maximum inventory", type = float, dest="q_max", default = 5)                 
+    parser.add_option("-v", "--volatility-spread",
+                       help="Volatility spread multipler", type=float, dest="vol_to_spread_multiplier", default = 1)
+    parser.add_option("-m", "--min-spread",
+                       help="Minimum spread size", type=float, dest="min_spread", default = 0.001)
+    parser.add_option("-x", "--max-spread",
+                       help="Maximum spread size", type=float, dest="max_spread", default = 0.01)
+    parser.add_option("-s", "--sleep",
+                       help="Time to sleep between orders", type=float, dest="sleep", default = 5)
 
     (options, args) = parser.parse_args()
     if len(args) < 3:
@@ -39,7 +59,18 @@ if __name__ == '__main__':
     account_name = args[0]
     underlying = args[1].upper()
     size = float(args[2])
-    q_max = size * options.q_max
+    
+    inventory_target_base_pct = 0
+
+    try:
+        split = underlying.split("/")
+        base_asset = split[0]
+        quote_asset = split[1]
+    except:
+        base_asset = underlying
+        quote_asset = 'USD'
+
+    MAX_LIST_SIZE = options.ewma_span * 4
 
     ftx_account = FtxAccount(account_name)
     ftx_feed = FtxExchangeFeed(account_name)
@@ -52,108 +83,138 @@ if __name__ == '__main__':
         time.sleep(1)
     else:
         raise Exception("Couldn't create exchange feed")
-        
+    
+    ewma_alpha = 2. / (options.ewma_span + 1)
 
     logger.info(f'Calibrating initial volatility...')
-    variance = 0
-    alpha = 2. / (1. + options.ewma_span)
-    market = ftx_feed.get_ticker(underlying)
-    prior_mid = (market['bid'] + market['ask']) / 2
-    for i in tqdm.tqdm(range(options.ewma_span)):
-        try:
-            market = ftx_feed.get_ticker(underlying)
-            mid = (market['bid'] + market['ask']) / 2
-            variance = (1 - alpha) * variance + alpha * (60 * 60 * 24 * 365) * (mid / prior_mid - 1)**2
-            prior_mid = mid
-            time.sleep(1)
-        except:
-            continue
-
+    trades = []
+    pbar = tqdm.tqdm(total = options.ewma_span)
+    while len(trades) < options.ewma_span:
+        new_trades = ftx_feed.get_trades(underlying)
+        new_trades = [trade['price'] for trade in new_trades]
+        trades = trades + new_trades
+        pbar.update(len(new_trades))
     
-    dt = (1 / 60) * (1 / 60) * (1 / 24)
-    n = 0
-    while True:
+
+    start_time = datetime.datetime.now()
+    closing_time = start_time + datetime.timedelta(seconds = options.T)
+    time_left_fraction = (closing_time - datetime.datetime.now()) / (closing_time - start_time)
+
+    while time_left_fraction > 0:
         positions = ftx_account.get_positions()
-        underlying_positions = list(filter(lambda position: position.name.upper() == underlying, positions))
+        quote_positions = list(filter(lambda position: position.name == quote_asset, positions))
+        quote_asset_amount = sum([position.net_size for position in quote_positions])
 
-        underlying_position_size = sum([position.net_size for position in underlying_positions])
-        underlying_position_dollars = sum([position.usd_value for position in underlying_positions])
+        base_positions = list(filter(lambda position: position.name.upper() == underlying, positions))
+        base_asset_amount = sum([position.net_size for position in base_positions])
 
-        total_portfolio_value = sum([abs(position.usd_value) for position in positions])
+        logger.info(f'Current Exposure: {base_asset} {base_asset_amount} / {quote_asset} {quote_asset_amount}')
 
-        q = underlying_position_size
+        new_trades = ftx_feed.get_trades(underlying)
+        new_trades = [trade['price'] for trade in new_trades]
+        trades = trades + new_trades
 
-        logger.info(f'Current Exposure: {underlying_position_size} | ${underlying_position_dollars}')
+        if len(trades) > MAX_LIST_SIZE:
+            trades = trades[len(trades) - MAX_LIST_SIZE:]
+
+        # get px
+        market = ftx_feed.get_ticker(underlying)
+        px = (market['bid'] + market['ask']) / 2.
+        
+        base_value = px * base_asset_amount
+        inventory_value = base_value + quote_asset_amount
+        target_inventory_value = inventory_value * inventory_target_base_pct
+        target_inventory_size = target_inventory_value / px
+
+        logger.info(f'Target Exposure: {base_asset} {target_inventory_size} / {quote_asset} {target_inventory_value}')
+
+        inventory_in_base = quote_asset_amount / px + base_asset_amount
+        q_adjustment_factor = 1e5 / inventory_in_base
+
+        q = (base_asset_amount - target_inventory_size) * q_adjustment_factor
+
+        # we only take the diff, not the log diff... not annualizing here, but getting 
+        # the local price variance
+        variance = vectorized.ewma(numpy.square(numpy.diff(trades)), ewma_alpha)
+
+        variance = variance[-1]
+        volatility = numpy.sqrt(variance)
+
+        time_left_fraction = (closing_time - datetime.datetime.now()) / (closing_time - start_time)
+
+        reservation_price = px - q * options.gamma * variance * time_left_fraction
+        optimal_spread = 2 / options.gamma * numpy.log(1 + options.gamma / options.k)
+
+        spread_inflation_due_to_volatility = max(options.vol_to_spread_multiplier * volatility, px * options.min_spread) / (px * options.min_spread)
+
+        min_limit_bid = px * (1. - options.max_spread * spread_inflation_due_to_volatility)
+        max_limit_bid = px * (1. - options.min_spread * spread_inflation_due_to_volatility)
+        min_limit_ask = px * (1. + options.min_spread * spread_inflation_due_to_volatility)
+        max_limit_ask = px * (1. + options.max_spread * spread_inflation_due_to_volatility)
+
+        r_ask = min(max(reservation_price + optimal_spread / 2.,
+                            min_limit_ask),
+                        max_limit_ask)
+
+        r_bid = min(max(reservation_price - optimal_spread / 2.,
+                            min_limit_bid),
+                        max_limit_bid)
+
+        logger.info(f'Offers: {r_bid} {px} {r_ask}')
+
+        with execution_scope(wait = False) as session:
+            if r_bid < px:
+                buy_order = LimitOrder(account = ftx_account,
+                                        market = underlying,
+                                        side = "buy",
+                                        size = size,
+                                        price = r_bid,
+                                        post_only = True)
+                session.add(buy_order)
+
+            if r_ask > px:
+                sell_order = LimitOrder(account = ftx_account,
+                                        market = underlying,
+                                        side = "sell",
+                                        size = size,
+                                        price = r_ask,
+                                        post_only = True)
+                session.add(sell_order)
+
 
         try:
-            market = ftx_feed.get_ticker(underlying)
-            mid = (market['bid'] + market['ask']) / 2
-            variance = (1 - alpha) * variance + alpha * (60 * 60 * 24 * 365) * (mid / prior_mid - 1)**2
-            prior_mid = mid
-        except:
-            continue
-
-        import ipdb; ipdb.set_trace()
-
-        # this is all based upon Avellaneda-Stoikov model
-        if numpy.isinf(options.T):
-            w = 0.5 * options.gamma**2 * variance * (q_max + 1)**2
-            coef = options.gamma**2 * variance / (2*w - options.gamma**2 * q**2 * variance)
-            r_ask = mid + (1 / options.gamma) * numpy.log(1 + ( 1 - 2*q) * coef)
-            r_bid = mid + (1 / options.gamma) * numpy.log(1 + (-1 - 2*q) * coef)
-            reservation_price = (r_ask + r_bid) / 2
-        else:
-            reservation_price = s - q * options.gamma * variance * (T - n * dt)
-            r_spread = 2 / options.gamma * numpy.log(1 + options.gamma / options.k)
-            r_ask = reservation_price + r_spread / 2.
-            r_bid = reservation_price - r_spread / 2.
-
-        px = {
-            'buy': r_bid,
-            'sell': r_ask
-        }
-
-        import ipdb; ipdb.set_trace()
-
-        logger.info(f'Current Exposure: {underlying_position_size} | ${underlying_position_dollars}')
-
-        # WHAT ORDER WE POST SHOULD BE BASED UPON MARKET TREND?
-        #   BUY AND SELL AT THE SAME TIME FOR FLAT MARKET?
-        #   BUY FIRST, THEN SELL FOR UP-TRENDING
-        #   SELL FIRST, THEN BUY FOR DOWN-TRENDING
-
-        # WHAT'S OUR MINIMUM SPREAD?
-        """
-        bid_order = None
-        try:
-            bid_order = ftx_account.place_order(underlying, side = 'buy', price = px['buy'], size = size, post_only = True)
-            logger.info(f'Bid Order: {bid_order.order_id}')
+            logger.info(f'Initiated buy order #{buy_order.get_id()}')
         except:
             pass
-            
 
-        ask_order = None
         try:
-            ask_order = ftx_account.place_order(underlying, side = 'sell', price = px['sell'], size = size, post_only = True)
-            logger.info(f'Ask Order: {ask_order.order_id}')
+            logger.info(f'Initiated sell order #{sell_order.get_id()}')
         except:
             pass
-            
-        time.sleep(1)
 
-        if bid_order:
-            try:
-                ftx_account.cancel_order(bid_order.order_id)
-            except:
-                pass
+        ### NOW SLEEP
+        logger.info(f'Going to sleep for {options.sleep}s...')
+        time.sleep(options.sleep)
+        logger.info(f'Awake!')
 
-        if ask_order:
-            try:
-                ftx_account.cancel_order(ask_order.order_id)
-            except:
-                pass
-        """
+        ### If we have orders, cancel them
 
-        time.sleep(1)
+        try:
+            order_status = buy_order.get_status()
+            if order_status.status == "closed":
+                logger.info(f'Buy order #{buy_order.get_id()} filled')
+            else:
+                logger.info(f'Canceling buy order #{buy_order.get_id()}')
+                buy_order.cancel()
+        except:
+            pass
 
-        n = n * 1
+        try:
+            order_status = sell_order.get_status()
+            if order_status.status == "closed":
+                logger.info(f'Sell order #{sell_order.get_id()} filled')
+            else:
+                logger.info(f'Canceling sell order #{sell_order.get_id()}')
+                sell_order.cancel()
+        except:
+            pass
