@@ -25,7 +25,7 @@ from cryptomancer.execution_handler.trailing_stop_order import TrailingStopOrder
 
 
 def run(args):
-    base, account_name, dollar_target, min_size, min_price_increment = args
+    base, account_name, dollar_target = args
 
     try:
         account = FtxAccount(account_name)
@@ -209,16 +209,18 @@ if __name__ == '__main__':
 
     sm = SecurityMaster("FTX")
 
+    """
     min_size = {}
     min_price_increment = {}
-    for underlying in ['BTC']: #, 'ETH', 'DOGE', 'MATIC', 'SOL']:
+    for underlying in ['BTC', 'ETH', 'DOGE', 'MATIC', 'SOL']:
         spec = sm.get_contract_spec(underlying + '-PERP')
         min_size[underlying] = spec['sizeIncrement']
         min_price_increment[underlying] = spec['priceIncrement']
+    """
 
     parameters = []
     for underlying in ['BTC', 'ETH', 'DOGE', 'MATIC', 'SOL']:
-        parameters.append((underlying, account_name, dollar_target, min_size[underlying], min_price_increment[underlying]))
+        parameters.append((underlying, account_name, dollar_target)
     
     #run(parameters[0])
     cryptomancer.parallel.lmap(run, parameters)
