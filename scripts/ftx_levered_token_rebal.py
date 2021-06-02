@@ -138,6 +138,9 @@ def run(args):
             order_status = order_status[0]
 
             filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
+            if abs(filled_size) < 1e-8:
+                continue
+
             logger.info(f'{base} | Attemped {side.upper()} {size:.4f} | FILLED {filled_size}')
             break
     else:
@@ -187,9 +190,8 @@ def run(args):
             logger.info(f'{base} | {side.upper()} {size} {underlying} FAILED')
             break
         else:
-            import ipdb; ipdb.set_trace()
             order_status = order_status[0]
-            if order_status.status == "closed":
+            if order_status.status == "triggered":
                 filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
                 logger.info(f'{base} | Filled {filled_size:.4f} in {underlying}')
                 break

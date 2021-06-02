@@ -52,8 +52,7 @@ class TrailingStopOrder(Order):
             status = account.place_conditional_order(market = self._market, side = self._side, size = self._size, type = self._type,
                                 trail_value = trail_value, **self._kwargs)
         
-        except Exception as e:
-            print(e)
+        except:
             status = OrderStatus(order_id = -1,
                             created_time = datetime.datetime.utcnow(),
                             market = self._market,
@@ -66,6 +65,17 @@ class TrailingStopOrder(Order):
 
         self.set_id(status.order_id)
         return status
+
+
+    def cancel(self) -> dict:
+        if not self.get_id():
+            raise Exception("Cannot cancel non-executed order.")
+
+        if self.failed():
+            return
+
+        account = self.get_account()
+        return account.cancel_order(self.get_id(), conditional_order = True)
 
 
     @session_required

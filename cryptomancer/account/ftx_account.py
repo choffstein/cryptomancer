@@ -90,7 +90,6 @@ class FtxAccount(Account):
                                 limit_price = limit_price, reduce_only = reduce_only, cancel = cancel,
                                 trigger_price = trigger_price, trail_value = trail_value)
 
-        print(f'Condition Order: {order_status}')
         return OrderStatus(order_id = order_status['id'],
                             created_time = pandas.Timestamp(order_status['createdAt']).to_pydatetime(),
                             market = order_status['market'],
@@ -130,7 +129,18 @@ class FtxAccount(Account):
     def get_conditional_order_status(self, market: str, order_id: str) -> OrderStatus:
         order_statuses = self.account.get_conditional_orders(market)
 
-        order_status = list(filter(lambda order: order['id'] == order_id, order_statuses))[0]
+        if len(order_statuses) == 0:
+            # try getting historical orders
+            order_statuses = self.account.get_conditional_order_history(market)
+            if len(order_statuses) == 0:
+                raise Exception("No conditional orders entered.")
+
+        order_status = list(filter(lambda order: order['id'] == order_id, order_statuses))
+
+        if len(order_status) == 0:
+            raise Exception(f"Conditional Order {order_id} not found.")
+        
+        order_status = order_status[0]
 
         return OrderStatus(order_id = order_status['id'],
                             created_time = pandas.Timestamp(order_status['createdAt']).to_pydatetime(),
