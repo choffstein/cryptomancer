@@ -9,6 +9,7 @@ class OrderStatus:
      order_id: int
      created_time: datetime.datetime
      market: str
+     type: str
      side: str
      size: float
      status: str

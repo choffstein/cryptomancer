@@ -10,7 +10,7 @@ from cryptomancer.account import Account
 class LimitOrderDollars(Order):
     def __init__(self, account: Account, market: str, side: str,
                     size_usd: float, price: float, **kwargs):
-        super().__init__(account, None)
+        super().__init__('limit_dollars', account, None)
         self._market = market
         self._side = side
         self._size_usd = size_usd
@@ -34,6 +34,7 @@ class LimitOrderDollars(Order):
             status = OrderStatus(order_id = -1,
                             created_time = datetime.datetime.utcnow(),
                             market = self._market,
+                            type = self._type,
                             side = self._side,
                             size = self._size,
                             filled_size = 0,

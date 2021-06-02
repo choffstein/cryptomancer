@@ -13,7 +13,7 @@ class AutoLimitOrderDollars(Order):
                  market: str, side: str, size_usd: float, 
                  attempts: Optional[int] = 5, width: Optional[float] = 0.001,
                  **kwargs):
-        super().__init__(account, exchange_feed)
+        super().__init__('limit_auto_dollars', account, exchange_feed)
         self._market = market
         self._side = side
         self._size_usd = size_usd
@@ -60,6 +60,7 @@ class AutoLimitOrderDollars(Order):
             status = OrderStatus(order_id = -1,
                             created_time = datetime.datetime.utcnow(),
                             market = self._market,
+                            type = self._type,
                             side = self._side,
                             size = self._size,
                             filled_size = 0,

@@ -3,7 +3,7 @@
 # Implements the Avellaneda-Stoikov model
 #   - adjustments for maximum / minimum spread values
 #   - adjustments for significant changes in volatility
-# 
+#   - bid/ask shape a la Optimal High-Frequency Market Making (Fushimi, Gonzalez Rojas, and Herma 2018)
 ##########################
 
 import sys
@@ -37,19 +37,20 @@ if __name__ == '__main__':
     parser.add_option("-c", "--calibration-period",
                       help="EWMA span to calibrate volatility to (# of trades)", type=int, dest="ewma_span", default = 120)
     parser.add_option("-g", "--risk-aversion",
-                       help="Inventory risk aversion parameter", type=float, dest="gamma", default = 0.5)
+                       help="Inventory risk aversion parameter in (0, inf)", type=float, dest="gamma", default = 0.5) #0 is no risk, 1 is very risky
     parser.add_option("-t", "--horizon",
                        help="Horizon of the trade; defaults to 8h", type=float, dest="T", default = 60*60*8)
     parser.add_option("-k", "--liquidity",
                        help="Orderbook liquidity parameter", type=float, dest="k", default = 1.5)
     parser.add_option("-v", "--volatility-spread",
-                       help="Volatility spread multipler", type=float, dest="vol_to_spread_multiplier", default = 1)
+                       help="Volatility spread multipler", type=float, dest="vol_to_spread_multiplier", default = 1.3)
     parser.add_option("-m", "--min-spread",
                        help="Minimum spread size", type=float, dest="min_spread", default = 0.001)
     parser.add_option("-x", "--max-spread",
                        help="Maximum spread size", type=float, dest="max_spread", default = 0.01)
     parser.add_option("-s", "--sleep",
                        help="Time to sleep between orders", type=float, dest="sleep", default = 5)
+
 
     (options, args) = parser.parse_args()
     if len(args) < 3:
@@ -61,6 +62,13 @@ if __name__ == '__main__':
     size = float(args[2])
     
     inventory_target_base_pct = 0
+
+    # Based upon (Fushimi, Gonzalez Rojas, and Herma 2018)
+    # In the paper, default size was 100 and n = -0.005
+    #    if size is smaller, we need n to be larger
+    #    and if size is larger, we need n to be smaller
+    size_shape = (100 / size) * -0.005
+
 
     try:
         split = underlying.split("/")
@@ -160,27 +168,32 @@ if __name__ == '__main__':
                             min_limit_bid),
                         max_limit_bid)
 
-        logger.info(f'Offers: {r_bid} {px} {r_ask}')
-
+        size_bid = size_ask = 0
+        q_unadj = q / q_adjustment_factor
+        
         with execution_scope(wait = False) as session:
             if r_bid < px:
+                size_bid = size if q_unadj < 0 else size * numpy.exp(size_shape * q_unadj)
+
                 buy_order = LimitOrder(account = ftx_account,
                                         market = underlying,
                                         side = "buy",
-                                        size = size,
+                                        size = size_bid,
                                         price = r_bid,
                                         post_only = True)
                 session.add(buy_order)
 
             if r_ask > px:
+                size_ask = size if q_unadj > 0 else size * numpy.exp(-size_shape * q_unadj)
                 sell_order = LimitOrder(account = ftx_account,
                                         market = underlying,
                                         side = "sell",
-                                        size = size,
+                                        size = size_ask,
                                         price = r_ask,
                                         post_only = True)
                 session.add(sell_order)
 
+        logger.info(f'Offers: ({size_bid:.4f}){r_bid:.2f} {px:.2f} {r_ask:.2f}({size_ask:.4f})')
 
         try:
             logger.info(f'Initiated buy order #{buy_order.get_id()}')

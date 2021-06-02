@@ -9,7 +9,7 @@ from cryptomancer.account import Account
 class LimitOrder(Order):
     def __init__(self, account: Account, market: str, side: str, 
                     size: float, price: float, **kwargs):
-        super().__init__(account, None)
+        super().__init__('limit', account, None)
         self._market = market
         self._side = side
         self._size = size
@@ -27,10 +27,11 @@ class LimitOrder(Order):
             status = account.place_order(market = self._market, side = self._side, price = self._price, 
                                     size = self._size, type = "limit", **self._kwargs)
         
-        except:
+        except Exception as e:
             status = OrderStatus(order_id = -1,
                             created_time = datetime.datetime.utcnow(),
                             market = self._market,
+                            type = self._type,
                             side = self._side,
                             size = self._size,
                             filled_size = 0,

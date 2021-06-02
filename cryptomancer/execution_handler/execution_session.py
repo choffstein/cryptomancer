@@ -22,11 +22,8 @@ def execution_scope(wait: bool = True, timeout: Optional[int] = None):
 
         # wait on the trades to finish before returning
         if wait:
-            session._wait()
-    except Exception as e:
-        print("Rolling back!")
-        print(e)
-        
+            session._wait(timeout)
+    except:
         # unwind the trades that have already been executed
         session._rollback()
         raise
@@ -93,8 +90,8 @@ class ExecutionSession(object):
             order.submit()
 
     @not_closed
-    def _wait(self):
+    def _wait(self, timeout: Optional[float] = None):
         if self._closed:
             raise Exception("Session is already closed.")
         for order in self._orders:
-            order.wait_until_closed()
+            order.wait_until_closed(timeout)

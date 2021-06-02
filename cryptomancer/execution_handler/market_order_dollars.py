@@ -11,7 +11,7 @@ from cryptomancer.exchange_feed import ExchangeFeed
 class MarketOrderDollars(Order):
     def __init__(self, account: Account, exchange_feed: ExchangeFeed, 
                  market: str, side: str, size_usd: float, attempts: Optional[int] = 5, **kwargs):
-        super().__init__(account, exchange_feed)
+        super().__init__('market_dollars', account, exchange_feed)
         self._market = market
         self._side = side
         self._size_usd = size_usd
@@ -57,6 +57,7 @@ class MarketOrderDollars(Order):
             status = OrderStatus(order_id = -1,
                             created_time = datetime.datetime.utcnow(),
                             market = self._market,
+                            type = self._type,
                             side = self._side,
                             size = self._size,
                             filled_size = 0,

@@ -56,6 +56,7 @@ class FtxAccount(Account):
             os = OrderStatus(order_id = order_status['id'],
                             created_time = pandas.Timestamp(order_status['createdAt']).to_pydatetime(),
                             market = order_status['market'],
+                            type = order_status['type'],
                             side = order_status['side'],
                             size = order_status['size'],
                             filled_size = order_status['filledSize'],
@@ -74,6 +75,7 @@ class FtxAccount(Account):
         return OrderStatus(order_id = order_status['id'],
                             created_time = pandas.Timestamp(order_status['createdAt']).to_pydatetime(),
                             market = order_status['market'],
+                            type = type,
                             side = order_status['side'],
                             size = order_status['size'],
                             filled_size = order_status['filledSize'],
@@ -88,13 +90,14 @@ class FtxAccount(Account):
                                 limit_price = limit_price, reduce_only = reduce_only, cancel = cancel,
                                 trigger_price = trigger_price, trail_value = trail_value)
 
-        print(order_status)
+        print(f'Condition Order: {order_status}')
         return OrderStatus(order_id = order_status['id'],
                             created_time = pandas.Timestamp(order_status['createdAt']).to_pydatetime(),
                             market = order_status['market'],
+                            type = type,
                             side = order_status['side'],
                             size = order_status['size'],
-                            filled_size = order_status['filledSize'],
+                            filled_size = None,
                             status = order_status['status'])
 
     def modify_order(self, order_id: str, price: Optional[float], size: Optional[float] = None) -> OrderStatus:
@@ -103,6 +106,7 @@ class FtxAccount(Account):
         return OrderStatus(order_id = order_status['id'],
                             created_time = pandas.Timestamp(order_status['createdAt']).to_pydatetime(),
                             market = order_status['market'],
+                            type = order_status['type'],
                             side = order_status['side'],
                             size = order_status['size'],
                             filled_size = order_status['filledSize'],
@@ -113,9 +117,25 @@ class FtxAccount(Account):
 
     def get_order_status(self, order_id: str) -> OrderStatus:
         order_status = self.account.get_order_status(existing_order_id = order_id)
+
         return OrderStatus(order_id = order_status['id'],
                             created_time = pandas.Timestamp(order_status['createdAt']).to_pydatetime(),
                             market = order_status['market'],
+                            type = order_status['type'],
+                            side = order_status['side'],
+                            size = order_status['size'],
+                            filled_size = order_status['filledSize'],
+                            status = order_status['status'])
+
+    def get_conditional_order_status(self, market: str, order_id: str) -> OrderStatus:
+        order_statuses = self.account.get_conditional_orders(market)
+
+        order_status = list(filter(lambda order: order['id'] == order_id, order_statuses))[0]
+
+        return OrderStatus(order_id = order_status['id'],
+                            created_time = pandas.Timestamp(order_status['createdAt']).to_pydatetime(),
+                            market = order_status['market'],
+                            type = order_status['type'],
                             side = order_status['side'],
                             size = order_status['size'],
                             filled_size = order_status['filledSize'],

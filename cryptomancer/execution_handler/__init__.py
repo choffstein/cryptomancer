@@ -12,7 +12,10 @@ from typing import Optional
 
 from functools import wraps
 
+import pytz
+import datetime
 import time
+
 
 def session_required(fn):
     @wraps(fn)
@@ -25,7 +28,8 @@ def session_required(fn):
 
 
 class Order:
-    def __init__(self, account: 'Account', exchange_feed: 'ExchangeFeed'):
+    def __init__(self, type: str, account: 'Account', exchange_feed: 'ExchangeFeed'):
+        self._type = type
         self._account = account
         self._exchange_feed = exchange_feed
         self._session = None
@@ -75,12 +79,22 @@ class Order:
         order_status = self.get_status()
         return (order_status.status == 'closed')
 
-    def wait_until_closed(self):
+    def wait_until_closed(self, timeout: Optional[float] = None):
+        if timeout:
+            status = self.get_status()
+            start_time = status.created_time
+            
         while True:
             if self.is_closed():
                 break
+
             # TODO: Better sleep method
             time.sleep(1)
+
+            if timeout:
+                now = pytz.utc.localize(datetime.datetime.utcnow())
+                if (now - start_time).seconds > timeout:
+                    raise TimeoutError("Order timed out.")
 
     def get_status(self) -> dict:
         if not self.get_id():
@@ -90,6 +104,7 @@ class Order:
             status = OrderStatus(order_id = -1,
                             created_time = None,
                             market = self._market,
+                            type = self._type,
                             side = self._side,
                             size = self._size,
                             filled_size = 0,

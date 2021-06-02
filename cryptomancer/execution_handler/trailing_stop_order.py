@@ -12,7 +12,7 @@ class TrailingStopOrder(Order):
                     market: str, side: str, size: float, 
                     attempts: Optional[int] = 5, width: Optional[float] = 0.001,
                     **kwargs):
-        super().__init__(account, exchange_feed)
+        super().__init__('trailing_stop', account, exchange_feed)
         self._market = market
         self._side = side
         self._size = size
@@ -49,13 +49,15 @@ class TrailingStopOrder(Order):
             if self._side == 'sell':
                 trail_value = -trail_value
 
-            status = account.place_conditional_order(market = self._market, side = self._side, size = self._size, type = 'trailing_stop', 
+            status = account.place_conditional_order(market = self._market, side = self._side, size = self._size, type = self._type,
                                 trail_value = trail_value, **self._kwargs)
         
-        except:
+        except Exception as e:
+            print(e)
             status = OrderStatus(order_id = -1,
                             created_time = datetime.datetime.utcnow(),
                             market = self._market,
+                            type = self._type,
                             side = self._side,
                             size = self._size,
                             filled_size = 0,
@@ -86,5 +88,26 @@ class TrailingStopOrder(Order):
             status = account.place_order(market = self._market, side = side, price = None, 
                                     size = filled, type = "market", ioc = True)
             self.set_id(status.order_id)
-
             self.wait_until_closed()
+
+
+    def get_status(self) -> dict:
+        if not self.get_id():
+            raise Exception("Cannot poll non-executed order.")
+        
+        if self.failed():
+            status = OrderStatus(order_id = -1,
+                            created_time = None,
+                            market = self._market,
+                            type = self._type,
+                            side = self._side,
+                            size = self._size,
+                            filled_size = 0,
+                            status = "closed"
+            )
+
+        else:
+            account = self.get_account()
+            status = account.get_conditional_order_status(self._market, self.get_id())
+
+        return status
