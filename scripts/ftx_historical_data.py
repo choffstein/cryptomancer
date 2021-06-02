@@ -207,9 +207,7 @@ if __name__ == '__main__':
     try:
         markets = ftx_client.get_markets()
         logger.info("Updating markets and prices")
-        #ada_perp = list(filter(lambda x: x['name'] == 'ADA-PERP', markets))[0]
-        #_update(ada_perp)
-        #parallel.lmap(_update, markets, progress_bar = True)
+        parallel.lmap(_update, markets, progress_bar = True)
 
         # figure out which contracts are perpetuals so we can 
         # get their related funding rates

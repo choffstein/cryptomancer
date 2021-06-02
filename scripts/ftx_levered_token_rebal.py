@@ -53,18 +53,17 @@ def run(args):
     else:
         tomorrow = now + datetime.timedelta(days = 1)
 
-    rebal_time = pytz.utc.localize(datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 2, 15, 0))
+    ##### REBAL TIME IS AT 00:02:00 UTC, BUT IN PRACTICE
+    ##### IT TENDS TO ACTUALLY FIRE OFF AFTER 00:02:20
+    rebal_time = pytz.utc.localize(datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 2, 20, 0))
     time_until_rebalance = rebal_time.timestamp() - now.timestamp()
 
-    logger.info(f"{base} | Sleeping for {time_until_rebalance - 15}s...")
-
+    logger.info(f"{base} | Sleeping for {time_until_rebalance - 30}s...")
     time.sleep(time_until_rebalance - 30)
-
     logger.info(f"{base} | Awake and ready to trade!")
     
-    ##### GO THROUGH THE LEVERED TOKENS
-    ##### AND FIGURE OUT HOW MUCH NAV NEEDS TO BE
-    ##### REBALANCED
+    ##### GO THROUGH THE LEVERED TOKEN AND FIGURE OUT 
+    ##### HOW MUCH NAV NEEDS TO BE REBALANCED
     market = ftx_client.get_market(underlying)
     mid_point = (market['bid'] + market['ask']) / 2.
 
@@ -91,6 +90,7 @@ def run(args):
 
 
     ##### EXECUTE A LIMIT ORDER
+    ##### WORTH TRYING TO DO A POST ONLY HERE?
     with execution_scope() as session:
         side = 'buy' if underlying_to_rebal > 1e-8 else 'sell'
     
@@ -103,17 +103,17 @@ def run(args):
                                         width = 0.005)
         session.add(underlying_order)
         
-
+    ##### MAKE SURE THE TRADE ACTUALLY WENT THROUGH
     order_status = session.get_order_statuses()
     if len(order_status) == 0:
-        # the order errored out
+        # TRADE MUST'VE BEEN CANCELLED, RETURN
         logger.info(f'{base} | {side.upper()} {size} {underlying} FAILED')
         return
 
     else:
+        # TRADE WAS GOOD; GET THE TOTAL FILL SIZE
         order_status = order_status[0]
 
-        # figure out how much of the order was actually filled
         filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
         logger.info(f'{base} | Filled {filled_size} in {underlying}')
     
@@ -151,14 +151,15 @@ def run(args):
                                         reduce_only = True) 
         session.add(underlying_order)
 
+    ##### CHECK THE ORDER STATUS AGAIN
     order_status = session.get_order_statuses()
     if len(order_status) == 0:
-        # the order errored out
+        # THIS IS PROBABLY A NO GOOD, VERY BAD THING AND NEEDS TO BE
+        # DEALT WITH SOME HOW
         logger.info(f'{base} | {side.upper()} {size} {underlying} FAILED')
     else:
         order_status = order_status[0]
 
-        # figure out how much of the order was actually filled
         filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
         logger.info(f'{base} | Filled {filled_size} in {underlying}')
 
