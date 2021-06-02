@@ -8,7 +8,7 @@ import numpy
 import datetime
 import pytz
 
-import quantlab.parallel
+import cryptomancer.parallel
 
 import time
 
@@ -39,6 +39,14 @@ def run(args):
 
     underlying = f'{base}-PERP'
 
+    if base == 'BTC':
+        tokens_to_keep = ['BULL', 'BEAR', 'HALF', 'HEDGE']
+    else:
+        tokens_to_keep = [base + token for token in ['BULL', 'BEAR', 'HALF', 'HEDGE']]
+
+    kept_tokens = [token for token in levered_tokens if token['name'] in tokens_to_keep]
+
+    ##### SLEEP UNTIL READY TO RUN
     now = pytz.utc.localize(datetime.datetime.utcnow())
     if now.hour == 0:
         tomorrow = now
@@ -50,21 +58,13 @@ def run(args):
 
     logger.info(f"{base} | Sleeping for {time_until_rebalance - 15}s...")
 
-    # wake up 30s before time until rebalance
     time.sleep(time_until_rebalance - 30)
 
     logger.info(f"{base} | Awake and ready to trade!")
-
-    # subscribe to trades
-    #_ = exchange_feed.get_trades(underlying)
-
-    if base == 'BTC':
-        tokens_to_keep = ['BULL', 'BEAR', 'HALF', 'HEDGE']
-    else:
-        tokens_to_keep = [base + token for token in ['BULL', 'BEAR', 'HALF', 'HEDGE']]
-
-    kept_tokens = [token for token in levered_tokens if token['name'] in tokens_to_keep]
-
+    
+    ##### GO THROUGH THE LEVERED TOKENS
+    ##### AND FIGURE OUT HOW MUCH NAV NEEDS TO BE
+    ##### REBALANCED
     market = ftx_client.get_market(underlying)
     mid_point = (market['bid'] + market['ask']) / 2.
 
@@ -83,15 +83,14 @@ def run(args):
 
     underlying_to_rebal = nav_to_rebal / mid_point
 
+    ##### GET CURRENT MARKET MIDPOINT TO FIGURE OUT TRADE SIZE
     market = ftx_client.get_market(underlying)
     mid_point = (market['bid'] + market['ask']) / 2.
     
     size = dollar_target / mid_point
 
-    # they do $4,000,000 orders
-    n_orders = abs(nav_to_rebal) / 4000000
-    n_orders = int(n_orders) + 1
 
+    ##### EXECUTE A LIMIT ORDER
     with execution_scope() as session:
         side = 'buy' if underlying_to_rebal > 1e-8 else 'sell'
     
@@ -119,6 +118,9 @@ def run(args):
         logger.info(f'{base} | Filled {filled_size} in {underlying}')
     
     """
+    n_orders = abs(nav_to_rebal) / 4000000
+    n_orders = int(n_orders) + 1
+
     # start at 00:02:20
     # 2nd trade is at 00:02:40
     # 3rd+ trade is every 10s after
@@ -133,6 +135,8 @@ def run(args):
     logger.info(f'{base} | Done sleeping; liquidating.')
     """
 
+    ##### WITH THE FILLED SIZE, SET A TRAILING STOP SELL 
+    ##### TO TRADE ANY MOMENTUM
     size = abs(filled_size)
     with execution_scope() as session:
         side = 'sell' if underlying_to_rebal > 1e-8 else 'buy'
@@ -180,4 +184,4 @@ if __name__ == '__main__':
     for underlying in ['BTC', 'ETH', 'DOGE', 'MATIC', 'SOL']:
         parameters.append((underlying, account_name, dollar_target, min_size[underlying], min_price_increment[underlying]))
     
-    quantlab.parallel.lmap(run, parameters)
+    cryptomancer.parallel.lmap(run, parameters)
