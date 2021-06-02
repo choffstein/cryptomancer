@@ -63,7 +63,7 @@ def run(args):
     time_until_rebalance = rebal_time.timestamp() - now.timestamp()
 
     logger.info(f"{base} | Sleeping for {time_until_rebalance - 60:.2f}s...")
-    #time.sleep(time_until_rebalance - 60)
+    time.sleep(time_until_rebalance - 60)
     logger.info(f"{base} | Awake and ready to trade!")
     
     ##### GO THROUGH THE LEVERED TOKEN AND FIGURE OUT 
@@ -217,8 +217,8 @@ if __name__ == '__main__':
         min_price_increment[underlying] = spec['priceIncrement']
 
     parameters = []
-    for underlying in ['BTC']: #, 'ETH', 'DOGE', 'MATIC', 'SOL']:
+    for underlying in ['BTC', 'ETH', 'DOGE', 'MATIC', 'SOL']:
         parameters.append((underlying, account_name, dollar_target, min_size[underlying], min_price_increment[underlying]))
     
-    run(parameters[0])
-    #cryptomancer.parallel.lmap(run, parameters)
+    #run(parameters[0])
+    cryptomancer.parallel.lmap(run, parameters)
