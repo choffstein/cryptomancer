@@ -25,7 +25,7 @@ from cryptomancer.execution_handler.trailing_stop_order import TrailingStopOrder
 
 
 def run(args):
-    base, account_name, dollar_target = args
+    base, proxy, account_name, dollar_target, trail_stop_width = args
 
     try:
         account = FtxAccount(account_name)
@@ -34,7 +34,6 @@ def run(args):
         logger.exception(e)
         sys.exit(0)
 
-
     ftx_client = ftx.FtxClient()
     levered_tokens = ftx_client.get_levered_tokens()
 
@@ -42,11 +41,12 @@ def run(args):
 
     # subscribe to bid/ask
     _ = exchange_feed.get_ticker(underlying)
+    _ = exchange_feed.get_ticker(f'{proxy}-PERP')
 
-    if base == 'BTC':
+    if proxy == 'BTC':
         tokens_to_keep = ['BULL', 'BEAR', 'HALF', 'HEDGE']
     else:
-        tokens_to_keep = [base + token for token in ['BULL', 'BEAR', 'HALF', 'HEDGE']]
+        tokens_to_keep = [proxy + token for token in ['BULL', 'BEAR', 'HALF', 'HEDGE']]
 
     kept_tokens = [token for token in levered_tokens if token['name'] in tokens_to_keep]
 
@@ -68,7 +68,7 @@ def run(args):
     
     ##### GO THROUGH THE LEVERED TOKEN AND FIGURE OUT 
     ##### HOW MUCH NAV NEEDS TO BE REBALANCED
-    market = ftx_client.get_market(underlying)
+    market = ftx_client.get_market(f'{proxy}-PERP')
     mid_point = (market['bid'] + market['ask']) / 2.
 
     nav_to_rebal = 0
@@ -86,7 +86,7 @@ def run(args):
 
     underlying_to_rebal = nav_to_rebal / mid_point
 
-    logger.info(f'{base} | Expected Rebalance: ${nav_to_rebal:.2f} / {underlying_to_rebal:2f} shares')
+    logger.info(f'{base} | Expected Rebalance of {proxy}-PERP: ${nav_to_rebal:.2f} / {underlying_to_rebal:2f} shares')
 
     ##### EXECUTE A LIMIT ORDER
     side = 'buy' if underlying_to_rebal > 1e-8 else 'sell'
@@ -147,23 +147,15 @@ def run(args):
         logger.info(f'{base} | Failed to execute initial order.  Bailing...')
         return
     
-    """
-    n_orders = abs(nav_to_rebal) / 4000000
-    n_orders = int(n_orders) + 1
+    # WE HAVE TO GO BACK TO SLEEP HERE JUST IN CASE WE GO FILLED TOO EARLY; WE
+    # DON'T WANT OUR STOP LOSS TRIGGERING TOO EARLY
+    now = pytz.utc.localize(datetime.datetime.utcnow())
+    rebal_time = pytz.utc.localize(datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 2, 30, 0))
+    time_until_rebalance = rebal_time.timestamp() - now.timestamp()
 
-    # start at 00:02:20
-    # 2nd trade is at 00:02:40
-    # 3rd+ trade is every 10s after
-    max_time = 60
-    if n_orders > 3:
-        max_time = max_time + 10 * (n_orders - 2)
-
-    logger.info(f'{base} | Sleeping for {max_time}s...')
-
-    time.sleep(max_time)
-
-    logger.info(f'{base} | Done sleeping; liquidating.')
-    """
+    logger.info(f"{base} | Sleeping for {time_until_rebalance:.2f}s...")
+    time.sleep(time_until_rebalance)
+    logger.info(f"{base} | Awake and ready to put on the stop!")
 
     ##### WITH THE FILLED SIZE, SET A TRAILING STOP SELL 
     ##### TO TRADE ANY MOMENTUM
@@ -177,7 +169,7 @@ def run(args):
                                         market = underlying,
                                         side = side,
                                         size = size,
-                                        width = 0.001,       # give it 10bps of width
+                                        width = trail_stop_width,
                                         reduce_only = True) 
         session.add(underlying_order)
 
@@ -218,9 +210,27 @@ if __name__ == '__main__':
         min_price_increment[underlying] = spec['priceIncrement']
     """
 
+    trail_stop = {
+        'BTC': 0.00125,
+        'ETH': 0.00125,
+        'DOGE': 0.0035,
+        'MATIC': 0.00125,
+        'ADA': 0.00125,
+        'SOL': 0.00125
+    }
+
+    proxy = {
+        'BTC': 'BTC',
+        'ETH': 'BTC',
+        'DOGE': 'BTC',
+        'MATIC': 'BTC',
+        'ADA': 'BTC',
+        'SOL': 'BTC'
+    }
+
     parameters = []
-    for underlying in ['BTC', 'ETH', 'DOGE', 'MATIC', 'SOL']:
-        parameters.append((underlying, account_name, dollar_target)
+    for underlying in ['BTC', 'DOGE', 'MATIC', 'ADA', 'SOL']:
+        parameters.append((underlying, proxy[underlying], account_name, dollar_target, trail_stop[underlying]))
     
-    #run(parameters[0])
+    #run(parameters[-1])
     cryptomancer.parallel.lmap(run, parameters)
