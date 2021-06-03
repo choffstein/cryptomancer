@@ -62,8 +62,8 @@ def run(args):
     rebal_time = pytz.utc.localize(datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 2, 20, 0))
     time_until_rebalance = rebal_time.timestamp() - now.timestamp()
 
-    logger.info(f"{base} | Sleeping for {time_until_rebalance - 60:.2f}s...")
-    time.sleep(time_until_rebalance - 60)
+    logger.info(f"{base} | Sleeping for {time_until_rebalance - 45:.2f}s...")
+    time.sleep(time_until_rebalance - 45)
     logger.info(f"{base} | Awake and ready to trade!")
     
     ##### GO THROUGH THE LEVERED TOKEN AND FIGURE OUT 
@@ -230,7 +230,7 @@ if __name__ == '__main__':
 
     parameters = []
     for underlying in ['BTC', 'DOGE', 'MATIC', 'ADA', 'SOL']:
-        parameters.append((underlying, proxy[underlying], account_name, dollar_target, trail_stop[underlying]))
+        parameters.append((underlying, proxy[underlying], account_name, dollar_target, trail_stop[underlying] * 3))
     
     #run(parameters[-1])
     cryptomancer.parallel.lmap(run, parameters)
