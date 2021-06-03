@@ -61,6 +61,7 @@ class MarketOrderDollars(Order):
                             side = self._side,
                             size = self._size,
                             filled_size = 0,
+                            average_fill_price = None,
                             status = "closed"
             )
 

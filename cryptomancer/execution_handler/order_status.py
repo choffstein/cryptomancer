@@ -14,4 +14,5 @@ class OrderStatus:
      size: float
      status: str
      filled_size: float
+     average_fill_price: float
      parameters: Optional[dict] = None

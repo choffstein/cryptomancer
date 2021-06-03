@@ -60,6 +60,7 @@ class FtxAccount(Account):
                             side = order_status['side'],
                             size = order_status['size'],
                             filled_size = order_status['filledSize'],
+                            average_fill_price = order_status['avgFillPrice'],
                             status = order_status['status'])
 
             order_statuses.append(os)
@@ -79,6 +80,7 @@ class FtxAccount(Account):
                             side = order_status['side'],
                             size = order_status['size'],
                             filled_size = order_status['filledSize'],
+                            average_fill_price = None,
                             status = order_status['status'])
 
 
@@ -97,6 +99,7 @@ class FtxAccount(Account):
                             side = order_status['side'],
                             size = order_status['size'],
                             filled_size = None,
+                            average_fill_price = None,
                             status = order_status['status'])
 
     def modify_order(self, order_id: str, price: Optional[float], size: Optional[float] = None) -> OrderStatus:
@@ -109,6 +112,7 @@ class FtxAccount(Account):
                             side = order_status['side'],
                             size = order_status['size'],
                             filled_size = order_status['filledSize'],
+                            average_fill_price = order_status['avgFillPrice'],
                             status = order_status['status'])
 
     def cancel_order(self, order_id: str) -> dict:
@@ -124,6 +128,7 @@ class FtxAccount(Account):
                             side = order_status['side'],
                             size = order_status['size'],
                             filled_size = order_status['filledSize'],
+                            average_fill_price = order_status['avgFillPrice'],
                             status = order_status['status'])
 
     def get_conditional_order_status(self, market: str, order_id: str) -> OrderStatus:
@@ -149,6 +154,7 @@ class FtxAccount(Account):
                             side = order_status['side'],
                             size = order_status['size'],
                             filled_size = order_status['filledSize'],
+                            average_fill_price = order_status['avgFillPrice'],
                             status = order_status['status'])
 
     def get_deposit_address(self, ticker: str, method: Optional[str] = None) -> dict:
