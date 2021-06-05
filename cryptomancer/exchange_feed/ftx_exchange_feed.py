@@ -5,8 +5,8 @@ from cryptomancer.exchange_feed import ExchangeFeed
 from cryptomancer.exchange_feed.ftx_wsocket_client import FtxWebsocketClient
 
 class FtxExchangeFeed(ExchangeFeed):
-    def __init__(self, account_name: Optional[str] = None):
-        self.wsocket_client = FtxWebsocketClient(account_name)
+    def __init__(self, account_name: Optional[str] = None, feed_endpoint: Optional[str] = None):
+        self.wsocket_client = FtxWebsocketClient(account_name, feed_endpoint)
 
     def get_orders(self) -> Dict[int, Dict]:
         return self.wsocket_client.get_orders()
@@ -24,7 +24,7 @@ class FtxExchangeFeed(ExchangeFeed):
         return self.wsocket_client.get_orderbook(market)
         
     def get_cumulative_orderbook(self, market: str) -> Dict[str, List[Tuple[float, float]]]:
-        ob = self.orderbook(market)
+        ob = self.get_orderbook(market)
 
         bids = ob['bids']
         asks = ob['asks']

@@ -1,3 +1,4 @@
+import sys
 import hmac
 import json
 import time
@@ -14,8 +15,10 @@ import cryptomancer.local_secrets as local_secrets
 class FtxWebsocketClient(WebsocketManager):
     _ENDPOINT = 'wss://ftx.com/ws/'
 
-    def __init__(self, account = None) -> None:
+    def __init__(self, account: Optional[str] = None, feed_endpoint: Optional[str] = None) -> None:
         super().__init__()
+        self._url = feed_endpoint if feed_endpoint is not None else self._ENDPOINT
+
         self._trades: DefaultDict[str, Deque] = defaultdict(lambda: deque([], maxlen=10000))
         self._fills: Deque = deque([], maxlen=10000)
         self._api_key = ''
@@ -29,7 +32,6 @@ class FtxWebsocketClient(WebsocketManager):
             self._subaccount = secret['SUBACCOUNT']
     
         self._orderbook_update_events: DefaultDict[str, Event] = defaultdict(Event)
-
         self._reset_data()
 
 
@@ -63,8 +65,7 @@ class FtxWebsocketClient(WebsocketManager):
 
 
     def _get_url(self) -> str:
-        return self._ENDPOINT
-
+        return self._url
 
     def _login(self) -> None:
         ts = int(time.time() * 1000)
@@ -176,7 +177,7 @@ class FtxWebsocketClient(WebsocketManager):
             return
         
         data = message['data']
-        
+
         if data['action'] == 'partial':
             self._reset_orderbook(market)
         
@@ -198,7 +199,7 @@ class FtxWebsocketClient(WebsocketManager):
             for (bid, offer) in zip_longest(orderbook['bids'][:100], orderbook['asks'][:100])
         ]
         computed_result = int(zlib.crc32(':'.join(checksum_data).encode()))
-        
+
         if computed_result != checksum:
             self._last_received_orderbook_data_at = 0
             self._reset_orderbook(market)
@@ -227,6 +228,7 @@ class FtxWebsocketClient(WebsocketManager):
     
     def _on_message(self, ws, raw_message: str) -> None:
         message = json.loads(raw_message)
+        
         message_type = message['type']
         
         if message_type in {'subscribed', 'unsubscribed'}:

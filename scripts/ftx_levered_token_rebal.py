@@ -65,9 +65,13 @@ def run(args):
     rebal_time = pytz.utc.localize(datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 2, 20, 0))
     time_until_rebalance = rebal_time.timestamp() - now.timestamp()
 
-    logger.info(f"{base} | Sleeping for {time_until_rebalance - 45:,.2f}s...")
-    time.sleep(time_until_rebalance - 45)
+    logger.info(f"{base} | Sleeping for {time_until_rebalance - 60:,.2f}s...")
+    if time_until_rebalance - 60 > 0:
+        time.sleep(time_until_rebalance - 60)
     logger.info(f"{base} | Awake and ready to trade!")
+
+    _ = exchange_feed.get_ticker(underlying)
+    _ = exchange_feed.get_ticker(f'{proxy}-PERP')
     
     # GO THROUGH THE LEVERED TOKEN AND FIGURE OUT 
     # HOW MUCH NAV NEEDS TO BE REBALANCED
@@ -89,7 +93,8 @@ def run(args):
 
     underlying_to_rebal = nav_to_rebal / mid_point
 
-    logger.info(f'{base} | Expected Rebalance of {proxy}-PERP: {locale.currency(nav_to_rebal, grouping = True)} / {underlying_to_rebal:,.2f} shares')
+    logger.info(f'{base} | Expected Rebalance of {proxy}-PERP: '
+                f'{locale.currency(nav_to_rebal, grouping = True)} / {underlying_to_rebal:,.2f} shares')
 
     # TRY TO POST LIQUIDITY THROUGH LIMIT ORDERS
     # RETRY UP TO 5X
@@ -146,7 +151,10 @@ def run(args):
             if abs(filled_size) < 1e-8:
                 continue
 
-            logger.info(f'{base} | Attemped {side.upper()} {size:,.4f} | FILLED {filled_size:,.4f} @ {locale.currency(order_status.average_fill_price, grouping = True)}')
+            # SHOULD WE CHECK IF THE FILLED SIZE < OUR TARGET FILLED SIZE AND TRY TO FILL MORE?
+            # OR SINCE WE'RE ON A TIME CONSTRAINT, JUST LET IT GO?
+            logger.info(f'{base} | Attemped {side.upper()} {size:,.4f} | FILLED {filled_size:,.4f}'
+                        f' @ {locale.currency(order_status.average_fill_price, grouping = True)}')
             break
     else:
         logger.info(f'{base} | Failed to execute entry order.  Bailing...')
@@ -193,7 +201,8 @@ def run(args):
             order_status = order_status[0]
             if order_status.status == "triggered":
                 filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
-                logger.info(f'{base} | Filled {filled_size:,.4f} in {underlying} @ {locale.currency(order_status.average_fill_price, grouping = True)}')
+                logger.info(f'{base} | Filled {filled_size:,.4f} in {underlying} @ '
+                            f'{locale.currency(order_status.average_fill_price, grouping = True)}')
                 break
             else:
                 time.sleep(1)
@@ -219,12 +228,13 @@ if __name__ == '__main__':
     """
 
     trail_stop = {
-        'BTC': 0.00125,
-        'ETH': 0.00125,
-        'DOGE': 0.0035,
-        'MATIC': 0.00125,
-        'ADA': 0.00125,
-        'SOL': 0.00125
+        'BTC': 0.0010,
+        'ETH': 0.0010,
+        'DOGE': 0.0020,
+        'MATIC': 0.0010,
+        'ADA': 0.0010,
+        'SOL': 0.0010,
+        'XRP': 0.0010
     }
 
     trail_stop_multiplier = 3
@@ -232,14 +242,16 @@ if __name__ == '__main__':
     proxy = {
         'BTC': 'BTC',
         'ETH': 'ETH',
-        'DOGE': 'DOGE',
+        'DOGE': 'BTC',
         'MATIC': 'BTC',
         'ADA': 'BTC',
-        'SOL': 'BTC'
+        'SOL': 'BTC',
+        'XRP': 'BTC'
     }
 
     parameters = []
-    for underlying in ['BTC', 'DOGE', 'MATIC', 'ADA', 'SOL']:
-        parameters.append((underlying, proxy[underlying], account_name, dollar_target, trail_stop[underlying] * trail_stop_multiplier))
+    for underlying in ['BTC', 'ETH', 'DOGE', 'MATIC', 'ADA', 'SOL', 'XRP']:
+        parameters.append((underlying, proxy[underlying], account_name, dollar_target, 
+                                            trail_stop[underlying] * trail_stop_multiplier))
     
     cryptomancer.parallel.lmap(run, parameters)

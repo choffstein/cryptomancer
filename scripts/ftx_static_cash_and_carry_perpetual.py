@@ -4,6 +4,9 @@ from optparse import OptionParser
 from typing import Optional, Tuple
 import time
 
+import locale
+locale.setlocale( locale.LC_ALL, '' )
+
 from loguru import logger
 logger.add("logs/ftx_static_cash_and_carry_perpetual.log", rotation="100 MB") 
 
@@ -14,21 +17,25 @@ from cryptomancer.exchange_feed.ftx_exchange_feed import FtxExchangeFeed
 
 from cryptomancer.execution_handler.execution_session import execution_scope
 
-from cryptomancer.execution_handler.auto_limit_order_dollars import AutoLimitOrderDollars
-from cryptomancer.execution_handler.auto_limit_order import AutoLimitOrder
+from cryptomancer.execution_handler.limit_order import LimitOrder
 
 
 def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, underlying: str, 
                         cash_collateral_target: float, cash_collateral_bounds: Tuple[float, float], 
-                        minimum_size: Optional[float] = 0.001):
+                        minimum_size: Optional[float] = 0.001,
+                        force: Optional[bool] = False):
     underlying_name = f'{underlying}/USD'
     future_name = f'{underlying}-PERP'
-    
+
+    # set up exchange subscriptions
+    _ = exchange_feed.get_ticker(underlying_name)
+    _ = exchange_feed.get_ticker(future_name)
+
     # get the current positions
     positions = account.get_positions()
 
     for position in positions:
-        logger.info(f'Current Position | {position.name} | {position.side} | {position.size} | ${position.usd_value}')
+        logger.info(f'Current Position | {position.name} | {position.side} | {position.size} | {locale.currency(position.usd_value, grouping = True)}')
 
     usd_coins = list(filter(lambda position: position.name == 'USD', positions))
     underlying_positions = list(filter(lambda position: position.name.upper() == underlying, positions))
@@ -40,7 +47,7 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
     portfolio_value = sum([position.usd_value for position in usd_coins]) + \
                         sum([position.usd_value for position in underlying_positions])
 
-    logger.info(f'Current Portfolio Value | ${portfolio_value}')
+    logger.info(f'Current Portfolio Value | {locale.currency(portfolio_value, grouping = True)}')
 
     usd_value = sum([position.usd_value for position in usd_coins])
     underlying_size = sum([position.net_size for position in underlying_positions])
@@ -54,10 +61,12 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
     logger.info(f'Current Margin | ' + '{:.2%}'.format(margin_pct))
 
     # if we're within our collateral bounds, do nothing
-    if margin_pct < cash_collateral_bounds[0] or margin_pct > cash_collateral_bounds[1]:
-
-        logger.info('Margin Target Out of Bounds (' + '{:.2%}'.format(cash_collateral_bounds[0]) + ', ' + 
+    if force or (margin_pct < cash_collateral_bounds[0] or margin_pct > cash_collateral_bounds[1]):
+        if (margin_pct < cash_collateral_bounds[0] or margin_pct > cash_collateral_bounds[1]):
+            logger.info('Margin Target Out of Bounds (' + '{:.2%}'.format(cash_collateral_bounds[0]) + ', ' + 
                                                     '{:.2%}'.format(cash_collateral_bounds[1]) + ')')
+        else:
+            logger.info('Trade Forced.')
 
         # otherwise, figure out what our target positions are
         target_margin_usd = portfolio_value * cash_collateral_target
@@ -70,31 +79,50 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
         # we do the trade in the underlying first because we're trying to hit a specific
         # dollar amount; once we get that dollar amount executed, we can match it with
         # a corresponding trade in the perpetuals
-        with execution_scope() as session:
-            side = 'buy' if target_usd_trade > 1e-8 else 'sell'
+        side = 'buy' if target_usd_trade > 1e-8 else 'sell'
+        logger.info(f'{side.upper()} {locale.currency(target_usd_trade, grouping = True)} {underlying_name}')
 
-            target_usd_trade = abs(target_usd_trade)
-            logger.info(f'{side.upper()} ${target_usd_trade} {underlying_name}')
-            underlying_order = AutoLimitOrderDollars(account = account,
-                                                    exchange_feed = exchange_feed,
+        while True:
+            market = exchange_feed.get_ticker(underlying_name)
+            mid_point = (market['bid'] + market['ask']) / 2.
+            width = (market['ask'] - market['bid']) / mid_point
+
+            price = mid_point * (1 - width / 2) if side == 'buy' else mid_point * (1 + width / 2)
+            size = abs(target_usd_trade) / price
+
+            try:
+                with execution_scope(wait = True, timeout = 10) as session:
+                    underlying_order = LimitOrder(account = account,
                                                     market = underlying_name,
                                                     side = side,
-                                                    size_usd = target_usd_trade)
+                                                    size = size,
+                                                    price = price,
+                                                    post_only = True)
 
-            session.add(underlying_order)
+                    session.add(underlying_order)
 
-        order_status = session.get_order_statuses()
-        if len(order_status) == 0:
-            # the order errored out
-            logger.info(f'{side.upper()} ${target_usd_trade} {underlying_name} FAILED')
-        else:
-            order_status = order_status[0]
+            except TimeoutError:
+                continue
 
-            # figure out how much of the order was actually filled
-            filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
-            underlying_size = underlying_size + filled_size
+            order_status = session.get_order_statuses()
+            if len(order_status) == 0:
+                # the order errored out
+                logger.info(f'{side.upper()} {locale.currency(target_usd_trade, grouping = True)} {underlying_name} FAILED')
+                continue
 
-            logger.info(f'Filled {filled_size} in {underlying_name} | Total: {underlying_size}')
+            else:
+                order_status = order_status[0]
+
+                # figure out how much of the order was actually filled
+                filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
+
+                if abs(filled_size) < 1e-8:
+                    continue
+
+                underlying_size = underlying_size + filled_size
+
+                logger.info(f'Filled {filled_size} in {underlying_name} | Total: {underlying_size}')
+                break
 
 
     # if we have 5 underlying, we need -5 perpetuals
@@ -102,32 +130,50 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
     perpetual_to_buy = (-underlying_size - perpetual_size)
     perpetual_to_buy = int(perpetual_to_buy / minimum_size) * minimum_size
 
+    side = 'buy' if perpetual_to_buy > 1e-8 else 'sell'
+    size = abs(perpetual_to_buy)
+
     if abs(perpetual_to_buy) > minimum_size:
-        with execution_scope() as session:
-            side = 'buy' if perpetual_to_buy > 1e-8 else 'sell'
-            size = abs(perpetual_to_buy)
-            logger.info(f"{side.upper()} {size} {future_name}")
-            perpetual_order = AutoLimitOrder(account = account,
-                                exchange_feed = exchange_feed,
-                                market = future_name,
-                                side = side,
-                                size = size)
-        
-            session.add(perpetual_order)
+        while True:
+            market = exchange_feed.get_ticker(future_name)
+            mid_point = (market['bid'] + market['ask']) / 2.
+            width = (market['ask'] - market['bid']) / mid_point
 
-        order_status = session.get_order_statuses()
-        if len(order_status) == 0:
-            # the order errored out
-            logger.info(f'{side.upper()} {size} {future_name} FAILED')
-            return
-        else:
-            order_status = order_status[0]
+            price = mid_point * (1 - width / 2) if side == 'buy' else mid_point * (1 + width / 2)
 
-        filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
-        total_perpetual = sum([position.net_size for position in perpetual_positions])
-        total_perpetual = total_perpetual + filled_size
+            try:
+                with execution_scope(wait = True, timeout = 10) as session:
+                    logger.info(f"{side.upper()} {size} {future_name}")
+                    perpetual_order = LimitOrder(account = account,
+                                        market = future_name,
+                                        side = side,
+                                        size = size,
+                                        price = price,
+                                        post_only = True)
+                
+                    session.add(perpetual_order)
+            except TimeoutError:
+                continue
 
-        logger.info(f'Filled {filled_size} in {future_name} | Total: {total_perpetual}')
+            order_status = session.get_order_statuses()
+            if len(order_status) == 0:
+                # the order errored out
+                logger.info(f'{side.upper()} {size} {future_name} FAILED')
+                continue
+
+            else:
+                order_status = order_status[0]
+
+                filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
+
+                if abs(filled_size) < 1e-8:
+                    continue
+
+                total_perpetual = sum([position.net_size for position in perpetual_positions])
+                total_perpetual = total_perpetual + filled_size
+
+                logger.info(f'Filled {filled_size} in {future_name} | Total: {total_perpetual}')
+                break
 
 
 if __name__ == '__main__':
@@ -140,6 +186,9 @@ if __name__ == '__main__':
                       help="Lower bound threshold for margin (forced rebalance)", type=float, dest="margin_low", default=0.15)
     parser.add_option("-u", "--margin-upper",
                       help="Upper bound threshold for margin (forced rebalance)", type=float, dest="margin_high", default=0.25)                                
+    parser.add_option("-f", "--force",
+                      help="Force the trade to go through", dest="force", default=False, action="store_true")                                
+
 
     (options, args) = parser.parse_args()
     if len(args) < 2:
@@ -194,4 +243,5 @@ if __name__ == '__main__':
     static_cash_and_carry(ftx_account, ftx_feed, underlying, 
                             cash_collateral_target = options.margin, 
                             cash_collateral_bounds = (options.margin_low, options.margin_high),
-                            minimum_size = min_size)
+                            minimum_size = min_size,
+                            force = options.force)
