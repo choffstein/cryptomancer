@@ -9,15 +9,58 @@ import functools
 import tqdm
 import time
 
+import inspect
 
-def _escapable_child(f, args):
+
+def _escapable_child(f, *args):
 	# help prevent any forking issues with seeding the RNG
 	numpy.random.seed()
 
 	try:
-		return f(args)
+		return f(*args)
+		
 	except KeyboardInterrupt:
 		return
+
+
+def aync_run(f_args, pool_size = None, process = True):
+	if pool_size == None:
+		try:
+			pool_size = multiprocessing.cpu_count()
+			
+		except NotImplementedError:
+			pool_size = 1
+
+	if process:
+		# processes are not subject to the GIL
+		pool = multiprocessing.Pool(processes = pool_size)
+			
+	else:
+		# threads are
+		pool = multiprocessing.pool.ThreadPool(processes = pool_size)
+
+	try:
+		async_results = []
+		for f, args in f_args:
+			partial_f = functools.partial(_escapable_child, f)
+			async_result = pool.apply_async(partial_f, args)
+			async_results.append(async_result)
+
+		pool.close()
+	
+	except KeyboardInterrupt:
+		pool.terminate()
+		raise
+		
+	except Exception:
+		pool.terminate()
+		raise
+		
+	finally:
+		pool.join()
+
+	return [async_result.get() for async_result in async_results]
+
 
 
 def lmap(f, lst, pool_size = None, process = True, progress_bar = False):
@@ -43,9 +86,9 @@ def lmap(f, lst, pool_size = None, process = True, progress_bar = False):
 	try:
 		partial_f = functools.partial(_escapable_child, f)
 		if progress_bar:
-			l = list(tqdm.tqdm(pool.imap(partial_f, lst),total=len(lst)))
+			l = list(tqdm.tqdm(pool.starmap(partial_f, lst), total=len(lst)))
 		else:
-			l = pool.map(partial_f, lst)
+			l = pool.starmap(partial_f, lst)
 		pool.close()
 	
 	except KeyboardInterrupt:

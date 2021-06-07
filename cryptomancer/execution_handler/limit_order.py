@@ -28,6 +28,7 @@ class LimitOrder(Order):
                                     size = self._size, type = "limit", **self._kwargs)
         
         except Exception as e:
+            self._exception = str(e)
             status = OrderStatus(order_id = -1,
                             created_time = datetime.datetime.utcnow(),
                             market = self._market,
@@ -36,12 +37,19 @@ class LimitOrder(Order):
                             size = self._size,
                             filled_size = 0,
                             average_fill_price = None,
-                            status = "closed"
+                            status = "closed",
+                            parameters = self._get_parameters(),
+                            exception = self._exception
             )
 
         self.set_id(status.order_id)
         return status
 
+    def _get_parameters(self) -> dict:
+        parameters = self._kwargs
+        parameters['limit'] = self._price
+
+        return parameters
 
     @session_required
     def rollback(self):
@@ -63,5 +71,5 @@ class LimitOrder(Order):
             status = account.place_order(market = self._market, side = side, price = None, 
                                     size = filled, type = "market", ioc = True)
             self.set_id(status.order_id)
-
+            
             self.wait_until_closed()

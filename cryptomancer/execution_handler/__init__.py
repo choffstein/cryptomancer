@@ -1,3 +1,4 @@
+import sys
 from typing import TYPE_CHECKING
 
 # this is necessary to avoid a circular import issue with Account and OrderStatus
@@ -34,6 +35,7 @@ class Order:
         self._exchange_feed = exchange_feed
         self._session = None
         self._id = None
+        self._exception = None
 
     def get_account(self):
         return self._account
@@ -89,13 +91,20 @@ class Order:
                 break
 
             # TODO: Better sleep method
-            time.sleep(1)
+            # May not even need this, as self.is_closed() is 
+            # likely a slow, blocking i/o process
+            time.sleep(0.1)
 
             if timeout:
                 now = pytz.utc.localize(datetime.datetime.utcnow())
-                if (now - start_time).seconds > timeout:
+                elapsed = (now - start_time).seconds
+                if elapsed > timeout:
                     raise TimeoutError("Order timed out.")
 
+
+    def _get_parameters(self) -> dict:
+        raise NotImplementedError
+        
     def get_status(self) -> dict:
         if not self.get_id():
             raise Exception("Cannot poll non-executed order.")
@@ -109,12 +118,16 @@ class Order:
                             size = self._size,
                             filled_size = 0,
                             average_fill_price = None,
-                            status = "closed"
+                            status = "closed",
+                            parameters = self._get_parameters(),
+                            exception = self._exception
             )
 
         else:
             account = self.get_account()
             status = account.get_order_status(self.get_id())
+            status.parameters = self._get_parameters()
+            status.exception = self._exception
 
         return status
 

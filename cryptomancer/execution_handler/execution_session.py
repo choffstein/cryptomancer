@@ -6,7 +6,7 @@ from typing import Optional
 from functools import wraps
 
 @contextmanager
-def execution_scope(wait: bool = True, timeout: Optional[int] = None):
+def execution_scope(wait: bool = True, timeout: Optional[int] = None, rollback: Optional[bool] = False):
     """Provide a transactional scope around a series of operations."""
     session = ExecutionSession(timeout)
     try:
@@ -23,10 +23,18 @@ def execution_scope(wait: bool = True, timeout: Optional[int] = None):
         # wait on the trades to finish before returning
         if wait:
             session._wait(timeout)
+    
     except:
         # unwind the trades that have already been executed
-        session._rollback()
+        if rollback:
+            # rollback implicitly cancels orders
+            session._rollback()
+        else:
+            # no need to rollback; just cancel
+            session._cancel()
+
         raise
+
     finally:
         # detach the session from underlying orders
         session._close()
@@ -48,11 +56,15 @@ class ExecutionSession(object):
         self._final_status = None
         self._closed = False
 
+    def get_orders(self):
+        return self._orders
+
     def get_order_statuses(self):
-        if not self._closed:
-            return [order.get_status() for order in self._orders]
-        else:
-            return self._final_statuses
+        #if not self._closed:
+        #    return [order.get_status() for order in self._orders]
+        #else:
+        #    return self._final_statuses
+        return [order.get_status() for order in self._orders]
 
     @not_closed
     def add(self, order):
@@ -61,6 +73,7 @@ class ExecutionSession(object):
 
     @not_closed
     def _close(self):
+        """
         if not self._closed:
             self._final_statuses = []
             for order in self._orders:
@@ -70,6 +83,18 @@ class ExecutionSession(object):
                 order.set_session(None)
             
             self._closed = True
+        """
+        self._closed = True
+
+    @not_closed
+    def _cancel(self):
+        cancelled_orders = []
+        for order in self._orders:
+            if order.is_submitted():
+                cancelled_orders.append(order)
+
+        for order in cancelled_orders:
+            order.wait_until_closed()
 
     @not_closed
     def _rollback(self):
@@ -93,5 +118,11 @@ class ExecutionSession(object):
     def _wait(self, timeout: Optional[float] = None):
         if self._closed:
             raise Exception("Session is already closed.")
+
+        # this code generally assumes all the orders in this 
+        # session were submitted at approximately the 
+        # same time, as the underlying code uses the created_date
+        # of the order to measure whether the timeout
+        # period has been exceeeded
         for order in self._orders:
             order.wait_until_closed(timeout)

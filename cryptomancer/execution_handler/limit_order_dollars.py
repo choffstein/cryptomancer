@@ -30,7 +30,9 @@ class LimitOrderDollars(Order):
             status = account.place_order(market = self._market, side = self._side, price = self._price, 
                                     size = self._size, type = "limit", **self._kwargs)
         
-        except:
+        except Exception as e:
+            self._exception = str(e)
+
             status = OrderStatus(order_id = -1,
                             created_time = datetime.datetime.utcnow(),
                             market = self._market,
@@ -39,7 +41,9 @@ class LimitOrderDollars(Order):
                             size = self._size,
                             filled_size = 0,
                             average_fill_price = None,
-                            status = "closed"
+                            status = "closed",
+                            parameters = self._get_parameters(),
+                            exception = self._exception
             )
 
         self.set_id(status.order_id)

@@ -84,7 +84,7 @@ class FtxAccount(Account):
                             status = order_status['status'])
 
 
-    def place_conditional_order(self, market: str, side: str, size: float, type: str = 'limit', limit_price: Optional[float] = None, 
+    def place_conditional_order(self, market: str, side: str, size: float, type: str, limit_price: Optional[float] = None, 
                                 reduce_only: bool = False, cancel: bool = False, trigger_price: Optional[float] = None,
                                 trail_value: Optional[float] = None) -> OrderStatus:
 

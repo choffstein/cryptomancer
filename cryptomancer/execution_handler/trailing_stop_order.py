@@ -10,11 +10,12 @@ from cryptomancer.exchange_feed import ExchangeFeed
 class TrailingStopOrder(Order):
     def __init__(self, account: Account, market: str, side: str, size: float, 
                     trail_value: int, **kwargs):
-        super().__init__('trailing_stop', account)
+        super().__init__('trailing_stop', account, None)
         self._market = market
         self._side = side
         self._size = size
         self._trail_value = trail_value
+        self._kwargs = kwargs
 
     @session_required
     def submit(self) -> dict:
@@ -24,8 +25,7 @@ class TrailingStopOrder(Order):
         account = self.get_account()
         
         try:
-            if self._side == 'sell':
-                trail_value = -trail_value
+            trail_value = self._trail_value if self._side == 'buy' else -self._trail_value
 
             status = account.place_conditional_order(market = self._market, 
                                                     side = self._side, 
@@ -34,7 +34,8 @@ class TrailingStopOrder(Order):
                                                     trail_value = trail_value, 
                                                     **self._kwargs)
         
-        except:
+        except Exception as e:
+            self._exception = str(e)
             status = OrderStatus(order_id = -1,
                             created_time = datetime.datetime.utcnow(),
                             market = self._market,
@@ -42,12 +43,20 @@ class TrailingStopOrder(Order):
                             side = self._side,
                             size = self._size,
                             filled_size = 0,
-                            status = "closed"
+                            average_fill_price = None,
+                            status = "closed",
+                            parameters = self._get_parameters(),
+                            exception = self._exception
             )
 
         self.set_id(status.order_id)
         return status
 
+    def _get_parameters(self) -> dict:
+        parameters = self._kwargs
+        parameters['trail_value'] = self._trail_value
+
+        return parameters
 
     def cancel(self) -> dict:
         if not self.get_id():
@@ -95,7 +104,10 @@ class TrailingStopOrder(Order):
                             side = self._side,
                             size = self._size,
                             filled_size = 0,
-                            status = "closed"
+                            average_fill_price = None,
+                            status = "closed",
+                            parameters = self._get_parameters(),
+                            exception = self._exception
             )
 
         else:
