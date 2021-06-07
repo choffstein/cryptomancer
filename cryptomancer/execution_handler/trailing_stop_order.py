@@ -8,17 +8,13 @@ from cryptomancer.account import Account
 from cryptomancer.exchange_feed import ExchangeFeed
 
 class TrailingStopOrder(Order):
-    def __init__(self, account: Account, exchange_feed: ExchangeFeed, 
-                    market: str, side: str, size: float, 
-                    attempts: Optional[int] = 5, width: Optional[float] = 0.001,
-                    **kwargs):
-        super().__init__('trailing_stop', account, exchange_feed)
+    def __init__(self, account: Account, market: str, side: str, size: float, 
+                    trail_value: int, **kwargs):
+        super().__init__('trailing_stop', account)
         self._market = market
         self._side = side
         self._size = size
-        self._attempts = attempts
-        self._width = width
-        self._kwargs = kwargs
+        self._trail_value = trail_value
 
     @session_required
     def submit(self) -> dict:
@@ -26,31 +22,17 @@ class TrailingStopOrder(Order):
             raise Exception("Cannot execute already working or finished market order.")
 
         account = self.get_account()
-        exchange_feed = self.get_exchange_feed()
-
-        for attempt in range(self._attempts):
-            try:
-                underlying_market = self._exchange_feed.get_ticker(self._market)
-                mid_price = (underlying_market['ask'] + underlying_market['bid']) / 2
-                trail_value = mid_price * self._width
-                break
-
-            except:
-                # weird issue where the first time we subscribe to a websocket we can sometimes get
-                # a {} response; so probably just retry...
-                time.sleep(1)
-                continue
-        else:
-            # we failed all attempts (didn't break from loop)
-            raise Exception("Exchange feed issue")
-
-
+        
         try:
             if self._side == 'sell':
                 trail_value = -trail_value
 
-            status = account.place_conditional_order(market = self._market, side = self._side, size = self._size, type = self._type,
-                                trail_value = trail_value, **self._kwargs)
+            status = account.place_conditional_order(market = self._market, 
+                                                    side = self._side, 
+                                                    size = self._size, 
+                                                    type = self._type,
+                                                    trail_value = trail_value, 
+                                                    **self._kwargs)
         
         except:
             status = OrderStatus(order_id = -1,

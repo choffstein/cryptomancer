@@ -22,13 +22,13 @@ from cryptomancer.security_master import SecurityMaster
 from cryptomancer.account.ftx_account import FtxAccount
 from cryptomancer.exchange_feed.ftx_exchange_feed import FtxExchangeFeed
 from cryptomancer.execution_handler.execution_session import execution_scope
+from cryptomancer.execution_handler.market_order import MarketOrder
 from cryptomancer.execution_handler.limit_order import LimitOrder
 from cryptomancer.execution_handler.auto_limit_order import AutoLimitOrder
-from cryptomancer.execution_handler.trailing_stop_order import TrailingStopOrder
 
 
 def run(args):
-    base, proxy, account_name, dollar_target, trailing_stop_width = args
+    base, proxy, account_name, dollar_target, max_trailing_stop_width, min_trade_size = args
 
     try:
         account = FtxAccount(account_name)
@@ -100,6 +100,10 @@ def run(args):
     # RETRY UP TO 5X
     # ON THE 6th TRY, JUST TAKE LIQUIDITY
     side = 'buy' if underlying_to_rebal > 1e-8 else 'sell'
+    
+    fills = []
+    fill_prices = []
+
     for retry in range(6):
 
         # GET CURRENT MID-POINT TO FIGURE OUT SIZE
@@ -151,15 +155,28 @@ def run(args):
             if abs(filled_size) < 1e-8:
                 continue
 
+            fill_price = order_status.average_fill_price
             # SHOULD WE CHECK IF THE FILLED SIZE < OUR TARGET FILLED SIZE AND TRY TO FILL MORE?
             # OR SINCE WE'RE ON A TIME CONSTRAINT, JUST LET IT GO?
             logger.info(f'{base} | Attemped {side.upper()} {size:,.4f} | FILLED {filled_size:,.4f}'
-                        f' @ {locale.currency(order_status.average_fill_price, grouping = True)}')
-            break
+                        f' @ {locale.currency(fill_price, grouping = True)}')
+
+            fills.append(filled_size)
+            fill_prices.append(fill_price)
+
+            # did we fill everything?  if not, reduce our dollar target and try again
+            if retry == 5 or ((dollar_target - filled_size * fill_price) / mid_point < min_trade_size):
+                break
+            else:
+                dollar_target = dollar_target - filled_size * fill_price
+                logger.info(f'{base} | Partial fill, trying to fill the rest...')
     else:
         logger.info(f'{base} | Failed to execute entry order.  Bailing...')
         return
     
+    total_fill = numpy.sum(fills)
+    average_fill_price = numpy.dot(fills, fill_prices) / numpy.sum(fills)
+
     # WE HAVE TO GO BACK TO SLEEP HERE JUST IN CASE WE GO FILLED TOO EARLY; WE
     # DON'T WANT OUR STOP LOSS TRIGGERING TOO EARLY
     now = pytz.utc.localize(datetime.datetime.utcnow())
@@ -167,45 +184,104 @@ def run(args):
     time_until_rebalance = rebal_time.timestamp() - now.timestamp()
 
     logger.info(f"{base} | Sleeping for {time_until_rebalance:,.2f}s...")
-    time.sleep(time_until_rebalance)
+    if time_until_rebalance > 0:
+        time.sleep(time_until_rebalance)
     logger.info(f"{base} | Awake and ready to put on the stop!")
 
     # WITH THE FILLED SIZE, SET A TRAILING STOP SO WE CAN
     # TRY TO BENEFIT FROM ANY MOMENTUM THAT OCCURS
     # THIS CODE IS LIQUIDITY TAKING, BUT LIKELY CHEAPER
     # THAN TRYING TO CHASE MARKETS WITH POST ORDERS
-    size = abs(filled_size)
+    size = abs(total_fill)
 
-    with execution_scope(wait = True) as session:
-        side = 'sell' if underlying_to_rebal > 1e-8 else 'buy'
+    # exponential decay shape for trailing stop
+    # width = max_width * exp(-shape * return)
+    if underlying_to_rebal > 1e-8:
+        shape_parameter = -125
+    else:
+        shape_parameter = 125
+
+    stop_f = lambda pct_change: max(0.00025, #2.5bp minimum stop 
+                                    min(max_trailing_stop_width * numpy.exp(shape_parameter * pct_change), 
+                                        max_trailing_stop_width))
+
+    limit_level = None
+    side = 'sell' if underlying_to_rebal > 1e-8 else 'buy'
+
+    t = 0
+    while True:
+        market = exchange_feed.get_ticker(underlying)
+        mid_point = (market['bid'] + market['ask']) / 2.
+
+        pct_change = mid_point / average_fill_price - 1
+        stop_width = stop_f(pct_change)
+
+        # if we had bought, we want a trailing stop below
+        if underlying_to_rebal > 0:
+            if limit_level:
+                if mid_point < limit_level: # we broke our limit
+                    logger.info(f'{base} | Broke limit: {locale.currency(mid_point, grouping = True)} < '
+                                    f'{locale.currency(limit_level, grouping = True)} ({stop_width:.4%})')
+                    break
+
+                limit_level = max(limit_level, mid_point * (1 - stop_width))
+            else:
+                limit_level = mid_point * (1 - stop_width)
+
+        else:
+            if limit_level:
+                if mid_point > limit_level: # we broke our limit
+                    logger.info(f'{base} | Broke limit: {locale.currency(mid_point, grouping = True)} > '
+                                    f'{locale.currency(limit_level, grouping = True)} ({stop_width:.4%})')
+                    break
+
+                limit_level = min(limit_level, mid_point * (1 + stop_width))
+            else:
+                limit_level = mid_point * (1 + stop_width)
+
+        t = t + 1
+        # every 30 seconds, report to the logs
+        if numpy.mod(t, 300) == 0:
+            if underlying_to_rebal > 0:
+                logger.info(f'{base} | {locale.currency(mid_point, grouping = True)} > '
+                                f'{locale.currency(limit_level, grouping = True)} '
+                                f'({(mid_point / limit_level - 1):.4%})')
+            else:
+                logger.info(f'{base} | {locale.currency(mid_point, grouping = True)} < '
+                                f'{locale.currency(limit_level, grouping = True)} '
+                                f'({(mid_point / limit_level - 1):.4%})')
+
+        time.sleep(0.1)
+        
     
-        logger.info(f'{base} | Attempting to {side.upper()} {size}')
-        underlying_order = TrailingStopOrder(account = account,
-                                        exchange_feed = exchange_feed,
+    # should probably auto limit order this in a loop to avoid
+    # creating too much impact
+    with execution_scope(wait = True) as session:   
+        logger.info(f'{base} | {side.upper()} {size:,.4f}')
+        underlying_order = MarketOrder(account = account,
                                         market = underlying,
                                         side = side,
                                         size = size,
-                                        width = trailing_stop_width,
                                         reduce_only = True) 
         session.add(underlying_order)
 
-    # CHECK THE ORDER STATUS AGAIN
-    while True:
-        order_status = session.get_order_statuses()
-        if len(order_status) == 0:
-            # THIS IS PROBABLY A NO GOOD, VERY BAD THING AND NEEDS TO BE
-            # DEALT WITH SOME HOW
-            logger.info(f'{base} | {side.upper()} {size} {underlying} FAILED')
-            break
+    
+    order_status = session.get_order_statuses()
+    if len(order_status) == 0:
+        # THIS IS PROBABLY A NO GOOD, VERY BAD THING AND NEEDS TO BE
+        # DEALT WITH SOME HOW
+        logger.info(f'{base} | {side.upper()} {size} {underlying} FAILED')
+
+    else:
+        order_status = order_status[0]
+        
+        if order_status.status == "closed":
+            filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
+            logger.info(f'{base} | Filled {filled_size:,.4f} in {underlying} @ '
+                        f'{locale.currency(order_status.average_fill_price, grouping = True)}')
+            
         else:
-            order_status = order_status[0]
-            if order_status.status == "triggered":
-                filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
-                logger.info(f'{base} | Filled {filled_size:,.4f} in {underlying} @ '
-                            f'{locale.currency(order_status.average_fill_price, grouping = True)}')
-                break
-            else:
-                time.sleep(1)
+            logger.info(f'{base} | {side.upper()} {size} {underlying} status {order_status.status}')
     
 
 if __name__ == '__main__':
@@ -213,19 +289,20 @@ if __name__ == '__main__':
     parser = OptionParser(usage = usage)
     (options, args) = parser.parse_args()
 
+    if len(args) < 2:
+        print(usage)
+        exit()
+
     account_name = args[0]
     dollar_target = float(args[1])
 
     sm = SecurityMaster("FTX")
-
-    """
     min_size = {}
     min_price_increment = {}
-    for underlying in ['BTC', 'ETH', 'DOGE', 'MATIC', 'SOL']:
+    for underlying in ['BTC', 'ETH', 'DOGE', 'MATIC', 'ADA', 'SOL','XRP']:
         spec = sm.get_contract_spec(underlying + '-PERP')
         min_size[underlying] = spec['sizeIncrement']
         min_price_increment[underlying] = spec['priceIncrement']
-    """
 
     trail_stop = {
         'BTC': 0.0010,
@@ -242,16 +319,17 @@ if __name__ == '__main__':
     proxy = {
         'BTC': 'BTC',
         'ETH': 'ETH',
-        'DOGE': 'BTC',
-        'MATIC': 'BTC',
-        'ADA': 'BTC',
-        'SOL': 'BTC',
-        'XRP': 'BTC'
+        'DOGE': 'ETH',
+        'MATIC': 'ETH',
+        'ADA': 'ETH',
+        'SOL': 'ETH',
+        'XRP': 'ETH'
     }
 
     parameters = []
     for underlying in ['BTC', 'ETH', 'DOGE', 'MATIC', 'ADA', 'SOL', 'XRP']:
         parameters.append((underlying, proxy[underlying], account_name, dollar_target, 
-                                            trail_stop[underlying] * trail_stop_multiplier))
+                                            trail_stop[underlying] * trail_stop_multiplier,
+                                            min_size[underlying]))
     
     cryptomancer.parallel.lmap(run, parameters)

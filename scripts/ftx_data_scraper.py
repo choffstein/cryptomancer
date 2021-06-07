@@ -173,14 +173,14 @@ if __name__ == '__main__':
     try:
         markets = ftx_client.get_markets()
         logger.info("Updating markets and prices")
-        parallel.lmap(_update, markets)
+        parallel.lmap(_update, markets, progress_bar = True)
 
         # figure out which contracts are perpetuals so we can 
         # get their related funding rates
         perpetuals = [market['name'] for market in 
                             filter(lambda market: '-PERP' in market['name'], markets)]
         logger.info("Updating funding rates")
-        parallel.lmap(_update_funding_rates, perpetuals)
+        parallel.lmap(_update_funding_rates, perpetuals, progress_bar = True)
 
     except Exception as e:
         logger.exception(str(e))
