@@ -79,7 +79,7 @@ class Order:
             return True
 
         order_status = self.get_status()
-        return (order_status.status == 'closed' or order_status.status == 'triggered')
+        return (order_status.status != 'open')
 
     def wait_until_closed(self, timeout: Optional[float] = None):
         if timeout:
