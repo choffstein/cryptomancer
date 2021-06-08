@@ -46,9 +46,9 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
 
     underlying = f'{base}-PERP'
 
-    # SUBSCRIBE TO BID/ASK FEEDS
+    # SUBSCRIBE TO BID/ASK FEEDS + TRADES
     _ = exchange_feed.get_ticker(underlying)
-    _ = exchange_feed.get_ticker(f'{proxy}-PERP')
+    _ = exchange_feed.get_trades(underlying)
 
     if proxy == 'BTC':
         tokens_to_keep = ['BULL', 'BEAR', 'HALF', 'HEDGE']
@@ -59,7 +59,7 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
     
     # GO THROUGH THE LEVERED TOKEN AND FIGURE OUT 
     # HOW MUCH NAV NEEDS TO BE REBALANCED
-    market = ftx_client.get_market(f'{proxy}-PERP')
+    market = ftx_client.get_market(underlying)
     mid_point = (market['bid'] + market['ask']) / 2.
 
     nav_to_rebal = 0
@@ -76,6 +76,8 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
         nav_to_rebal = nav_to_rebal + nav * (leverage**2 - leverage) * r
 
     underlying_to_rebal = nav_to_rebal / mid_point
+    
+    n_rebals = int(underlying_to_rebal / 4000000) + 1
 
     logger.info(f'{base} | Expected Rebalance of {proxy}-PERP: '
                 f'{locale.currency(nav_to_rebal, grouping = True)} / {underlying_to_rebal:,.2f} shares')
@@ -92,73 +94,40 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
     else:
         tomorrow = now + datetime.timedelta(days = 1)
 
-    # REBAL TIME IS AT 00:02:00 UTC
+    # REBAL TIME IS AT 00:02:00 UTC, start entering at 00:01:30
     rebal_time = pytz.utc.localize(datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 2, 0, 0))
+    execution_time = rebal_time - datetime.timedelta(seconds = 30)
+    
+    # do a patient entry 
+    time_until_entry = execution_time.timestamp() - now.timestamp()
+    if time_until_entry > 0:
+        logger.info(f"{base} | Sleeping for {time_until_end:,.2f}s...")
+        time.sleep(time_until_end)
+        logger.info(f"{base} | Awake and ready to put on trade!")
 
-    # Try to TWAP the trade 10 times over the 5 minutes prior to the rebalance target time
-    # (each TWAP is given 30s; if we run the program with less than 5 minutes until rebalance
-    #  we'll end up doing fewer rebals, but we keep the 30s window)
-    delta_s = 30
-    n_rebals = max(1, min(10, int((rebal_time - now).seconds / delta_s)))
-    dollars_per_rebal = dollar_target / n_rebals
-
-    market = exchange_feed.get_ticker(underlying)
-    mid_point = (market['bid'] + market['ask']) / 2.
-
-    while (dollars_per_rebal / mid_point) < min_trade_size and n_rebals > 0:
-        n_rebals = n_rebals - 1
-        dollars_per_rebal = dollar_target / n_rebals
-
-    # JUST 1 BUY
-    n_rebals = 1 
-    dollars_per_rebal = dollar_target
-
-    if n_rebals == 0:
-        logger.info(f'{base} | Dollar trade target too small for a single rebalance.  Exiting.')
-        return
-
-    logger.info(f'{base} | TWAPing with {n_rebals} orders.')
-
-    # set the TWAP times
-    # for testing we can use "now +", but in actual practice we want to use "rebal_time -"
-    #execution_times = [rebal_time - datetime.timdelta(seconds = 30 * i) for i in range(0, n_rebals)]
-    execution_times = [now + datetime.timedelta(seconds = 5 * i) for i in range(0, n_rebals)]
-
-    # need to force this to a list because zip iterable doesn't work with 
-    # parallel code
-    args = zip(list(range(1, n_rebals+1)),
-                [account_name] * n_rebals,
-                [base] * n_rebals,
-                [underlying] * n_rebals,
-                [dollars_per_rebal] * n_rebals,
-                execution_times,
-                [side] * n_rebals,
-                [5] * n_rebals,
-                [min_trade_size] * n_rebals)
-
-    # run the TWAP as parallel threads
-    results = cryptomancer.parallel.lmap(patient_entry, args)
-
-    # calculate the results as total fill and average fill price
-    fills = [result[0] for result in results] 
-    fill_prices = [result[1] for result in results]
-
-    fills = [fill for sublist in fills for fill in sublist]
-    fill_prices = [fill_price for sublist in fill_prices for fill_price in sublist]
+    fills, fill_prices = patient_entry(account_name, base, underlying, dollar_target, side, 5, min_trade_size)
 
     total_fill = numpy.sum(fills)
     average_fill_price = numpy.dot(fills, fill_prices) / numpy.sum(fills)
 
     # WE HAVE TO GO BACK TO SLEEP HERE JUST IN CASE WE GO FILLED TOO EARLY; WE
     # DON'T WANT OUR STOP LOSS TRIGGERING TOO EARLY
-    now = pytz.utc.localize(datetime.datetime.utcnow())
-    rebal_time = pytz.utc.localize(datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 2, 30, 0))
-    time_until_rebalance = rebal_time.timestamp() - now.timestamp()
+    end_time = pytz.utc.localize(datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 2, 0, 0))
+    if n_rebals <= 2:
+        # 20 seconds for the first two rebals (00:02:20 and 00:02:40)
+        end_time = rebal_time + n_rebals * datetime.timedelta(seconds = 20)
+    elif n_rebals > 2:
+        # 11 seconds for every rebalance after
+        end_time = rebal_time + 2 * datetime.datetime(seconds = 20) + (n_rebals - 2) * datetime.datetime(seconds = 11)
 
-    logger.info(f"{base} | Sleeping for {time_until_rebalance:,.2f}s...")
-    #if time_until_rebalance > 0:
-    #    time.sleep(time_until_rebalance)
-    logger.info(f"{base} | Awake and ready to put on the stop!")
+    now = pytz.utc.localize(datetime.datetime.utcnow())
+    time_until_end = end_time.timestamp() - now.timestamp()
+
+    if time_until_end > 0:
+        logger.info(f"{base} | Sleeping for {time_until_end:,.2f}s...")
+        time.sleep(time_until_end)
+        logger.info(f"{base} | Awake and ready to put on the stop!")
+
 
     # WITH THE FILLED SIZE, SET A TRAILING STOP SO WE CAN
     # TRY TO BENEFIT FROM ANY MOMENTUM THAT OCCURS
@@ -167,24 +136,12 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
     size = abs(total_fill)
     side = 'sell' if underlying_to_rebal > 1e-8 else 'buy'
 
-    # sell 1/3rd of size at a 2x vol trigger
-    # sell 1/3rd of size at 3x vol trigger
-    # sell all size with 1x vol trigger
+    market = ftx_client.get_market(underlying)
+    mid_point = (market['bid'] + market['ask']) / 2.
 
-    # if we need the take profit to buy, we want it to be above the current price
-    # if the take profit is a sell, we want it below the current price
-    take_profit_l1 = average_fill_price * (1. - 2 * volatility) if side == 'buy' else average_fill_price * (1. + 2 * volatility)
-    take_profit_l1_args = (account_name, base, underlying, size / 3, side, take_profit_l1)
+    trail_value = mid_point * volatility
+    trailing_stop(account_name, base, underlying, size, side, trail_value)
 
-    take_profit_l2 = average_fill_price * (1. - 3 * volatility) if side == 'buy' else average_fill_price * (1. + 3 * volatility)
-    take_profit_l2_args = (account_name, base, underlying, size / 3, side, take_profit_l2)
-
-    trail_value = average_fill_price * volatility
-    trailing_stop_args = (account_name, base, underlying, size, side, trail_value)
-
-    cryptomancer.parallel.aync_run([(take_profit, take_profit_l1_args),
-                                    (take_profit, take_profit_l2_args),
-                                    (trailing_stop, trailing_stop_args)]
 
 
 if __name__ == '__main__':
@@ -198,6 +155,7 @@ if __name__ == '__main__':
 
     account_name = args[0]
     dollar_target = float(args[1])
+    #holding = int(args[2])
 
     # do the import here to avoid re-importing with the parallel calls
     from cryptomancer.security_master import SecurityMaster
@@ -210,18 +168,22 @@ if __name__ == '__main__':
         min_size[underlying] = spec['sizeIncrement']
         min_price_increment[underlying] = spec['priceIncrement']
 
-    # replace this with volatility
-    trail_stop = {
-        'BTC': 0.0010,
-        'ETH': 0.0010,
-        'DOGE': 0.0020,
-        'MATIC': 0.0010,
-        'ADA': 0.0010,
-        'SOL': 0.0010,
-        'XRP': 0.0010
-    }
+    now = pytz.utc.localize(datetime.datetime.utcnow())
+    yesterday = now - datetime.timedelta(days = 1)
 
-    trail_stop_multiplier = 3
+    end_ts = int(now.timestamp())
+    start_ts = int(yesterday.timestamp())
+
+    # get 1-day 1-minute bar volatility levels
+    import ftx
+    ftx_client = ftx.FtxClient()
+
+    vol = {}
+    for underlying in ['BTC', 'ETH', 'DOGE', 'MATIC', 'ADA', 'SOL','XRP']:
+        df = ftx_client.get_historical_data(underlying + '-PERP', resolution = 60, limit = None, start_time = start_ts, end_time = end_ts)
+        df = pandas.DataFrame(df).set_index('startTime').sort_index()['close']
+        vol[underlying] = df.apply(numpy.log).diff().std()
+
 
     proxy = {
         'BTC': 'BTC',
@@ -236,9 +198,7 @@ if __name__ == '__main__':
     parameters = []
     for underlying in ['BTC', 'ETH', 'DOGE', 'MATIC', 'ADA', 'SOL', 'XRP']:
         parameters.append((underlying, proxy[underlying], account_name, dollar_target, 
-                                            trail_stop[underlying] * trail_stop_multiplier, 
-                                            min_size[underlying]))
+                                            vol[underlying], min_size[underlying]))
     
-    #run(*parameters[1])
-
-    cryptomancer.parallel.lmap(run, parameters)
+    run(*parameters[1])
+    #cryptomancer.parallel.lmap(run, parameters)

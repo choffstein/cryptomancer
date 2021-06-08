@@ -64,5 +64,4 @@ def trailing_stop(account_name: str, base: str, underlying: str, size: float, si
         else:
             logger.info(f'{base} | {side.upper()} {size:,.4f} {underlying} status {order_status.status}')
 
-
     return (order_status.filled_size, order_status.average_fill_price)
