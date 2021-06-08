@@ -48,7 +48,6 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
 
     # SUBSCRIBE TO BID/ASK FEEDS + TRADES
     _ = exchange_feed.get_ticker(underlying)
-    _ = exchange_feed.get_trades(underlying)
 
     if proxy == 'BTC':
         tokens_to_keep = ['BULL', 'BEAR', 'HALF', 'HEDGE']
@@ -101,8 +100,8 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
     # do a patient entry 
     time_until_entry = execution_time.timestamp() - now.timestamp()
     if time_until_entry > 0:
-        logger.info(f"{base} | Sleeping for {time_until_end:,.2f}s...")
-        time.sleep(time_until_end)
+        logger.info(f"{base} | Sleeping for {time_until_entry:,.2f}s...")
+        time.sleep(time_until_entry)
         logger.info(f"{base} | Awake and ready to put on trade!")
 
     fills, fill_prices = patient_entry(account_name, base, underlying, dollar_target, side, 5, min_trade_size)

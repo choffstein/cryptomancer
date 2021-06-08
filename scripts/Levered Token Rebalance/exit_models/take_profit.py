@@ -53,7 +53,7 @@ def take_profit(account_name: str, base: str, underlying: str, size: float, side
             time.sleep(0.1)
             order_status = session.get_order_statuses()[0]
         
-        if order_status.status == "closed":
+        if order_status.status == "closed" or order_status == "triggered":
             filled_size = abs(order_status.filled_size)
             if filled_size > 1e-8:
                 logger.info(f'{base} | Filled {filled_size:,.4f} in {underlying} @ '
