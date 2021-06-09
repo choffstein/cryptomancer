@@ -81,9 +81,6 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
     logger.info(f'{base} | Expected Rebalance of {proxy}-PERP: '
                 f'{locale.currency(nav_to_rebal, grouping = True)} / {underlying_to_rebal:,.2f} shares')
 
-    # TRY TO POST LIQUIDITY THROUGH LIMIT ORDERS
-    # RETRY UP TO 5X
-    # ON THE 6th TRY, JUST TAKE LIQUIDITY
     side = 'buy' if underlying_to_rebal > 1e-8 else 'sell'
     
     # SLEEP UNTIL READY TO RUN
@@ -154,15 +151,16 @@ if __name__ == '__main__':
 
     account_name = args[0]
     dollar_target = float(args[1])
-    #holding = int(args[2])
 
     # do the import here to avoid re-importing with the parallel calls
     from cryptomancer.security_master import SecurityMaster
     sm = SecurityMaster("FTX")
 
+    to_trade = ['BTC', 'ETH', 'DOGE', 'MATIC', 'ADA', 'SOL','XRP']
+
     min_size = {}
     min_price_increment = {}
-    for underlying in ['BTC', 'ETH', 'DOGE', 'MATIC', 'ADA', 'SOL','XRP']:
+    for underlying in to_trade:
         spec = sm.get_contract_spec(underlying + '-PERP')
         min_size[underlying] = spec['sizeIncrement']
         min_price_increment[underlying] = spec['priceIncrement']
@@ -178,26 +176,25 @@ if __name__ == '__main__':
     ftx_client = ftx.FtxClient()
 
     vol = {}
-    for underlying in ['BTC', 'ETH', 'DOGE', 'MATIC', 'ADA', 'SOL','XRP']:
+    for underlying in to_trade:
         df = ftx_client.get_historical_data(underlying + '-PERP', resolution = 60, limit = None, start_time = start_ts, end_time = end_ts)
         df = pandas.DataFrame(df).set_index('startTime').sort_index()['close']
         vol[underlying] = df.apply(numpy.log).diff().std()
 
-
     proxy = {
         'BTC': 'BTC',
         'ETH': 'ETH',
-        'DOGE': 'ETH',
-        'MATIC': 'ETH',
-        'ADA': 'ETH',
-        'SOL': 'ETH',
-        'XRP': 'ETH'
+        'DOGE': 'DOGE',
+        'MATIC': 'MATIC',
+        'ADA': 'ADA',
+        'SOL': 'SOL',
+        'XRP': 'XRP'
     }
 
     parameters = []
-    for underlying in ['BTC', 'ETH', 'DOGE', 'MATIC', 'ADA', 'SOL', 'XRP']:
+    for underlying in to_trade:
         parameters.append((underlying, proxy[underlying], account_name, dollar_target, 
                                             vol[underlying], min_size[underlying]))
     
-    run(*parameters[1])
-    #cryptomancer.parallel.lmap(run, parameters)
+    #run(*parameters[1])
+    cryptomancer.parallel.lmap(run, parameters)
