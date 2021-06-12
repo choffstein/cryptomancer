@@ -18,7 +18,7 @@ from cryptomancer.execution_handler.trailing_stop_order import TrailingStopOrder
 from typing import Optional, Tuple
 
 def trailing_stop(account_name: str, base: str, underlying: str, size: float, side: str, 
-                    trail_value: float) -> Tuple[float, Optional[float]]:
+                    trail_value: float, reduce_only: Optional[bool] = False) -> Tuple[float, Optional[float]]:
 
     account = FtxAccount(account_name)
 
@@ -32,7 +32,7 @@ def trailing_stop(account_name: str, base: str, underlying: str, size: float, si
                                         side = side,
                                         size = size,
                                         trail_value = trail_value,
-                                        reduce_only = True)
+                                        reduce_only = reduce_only)
 
         session.add(underlying_order)
 

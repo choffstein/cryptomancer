@@ -58,7 +58,7 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
     
     # GO THROUGH THE LEVERED TOKEN AND FIGURE OUT 
     # HOW MUCH NAV NEEDS TO BE REBALANCED
-    market = ftx_client.get_market(underlying)
+    market = ftx_client.get_market(f'{proxy}-PERP')
     mid_point = (market['bid'] + market['ask']) / 2.
 
     nav_to_rebal = 0
@@ -79,7 +79,7 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
     n_rebals = int(underlying_to_rebal / 4000000) + 1
 
     logger.info(f'{base} | Expected Rebalance of {proxy}-PERP: '
-                f'{locale.currency(nav_to_rebal, grouping = True)} / {underlying_to_rebal:,.2f} shares')
+                f'{locale.currency(nav_to_rebal, grouping = True)} / {underlying_to_rebal:,.2f} shares / {n_rebals} trades')
 
     side = 'buy' if underlying_to_rebal > 1e-8 else 'sell'
     
@@ -90,8 +90,14 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
     else:
         tomorrow = now + datetime.timedelta(days = 1)
 
-    # REBAL TIME IS AT 00:02:00 UTC, start entering at 00:01:30
+    
+    # REBAL TIME IS AT 00:02:00 UTC
+    # THERE IS WEIRD, ABNORMALLY POSITIVE VOLUME AT 00:00.  IF WE'RE BUYING, BUY AT 23:59:30
+    # IF WE ARE SELLING, SELL AT 00:01:30
     rebal_time = pytz.utc.localize(datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 2, 0, 0))
+    #if side == 'buy':
+    #    execution_time = rebal_time - datetime.timedelta(seconds = 30*5)
+    #else:
     execution_time = rebal_time - datetime.timedelta(seconds = 30)
     
     # do a patient entry 
@@ -109,12 +115,8 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
     # WE HAVE TO GO BACK TO SLEEP HERE JUST IN CASE WE GO FILLED TOO EARLY; WE
     # DON'T WANT OUR STOP LOSS TRIGGERING TOO EARLY
     end_time = pytz.utc.localize(datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 2, 0, 0))
-    if n_rebals <= 2:
-        # 20 seconds for the first two rebals (00:02:20 and 00:02:40)
-        end_time = rebal_time + n_rebals * datetime.timedelta(seconds = 20)
-    elif n_rebals > 2:
-        # 11 seconds for every rebalance after
-        end_time = rebal_time + 2 * datetime.datetime(seconds = 20) + (n_rebals - 2) * datetime.datetime(seconds = 11)
+    # 20 seconds for the first two rebalances, 11 seconds for every rebalance after that
+    end_time = end_time + min(n_rebals, 2) * datetime.timedelta(seconds = 20) + max(0, (n_rebals - 2)) * datetime.timedelta(seconds = 11)
 
     now = pytz.utc.localize(datetime.datetime.utcnow())
     time_until_end = end_time.timestamp() - now.timestamp()
@@ -134,9 +136,14 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
 
     market = ftx_client.get_market(underlying)
     mid_point = (market['bid'] + market['ask']) / 2.
-
     trail_value = mid_point * volatility
-    trailing_stop(account_name, base, underlying, size, side, trail_value)
+
+    # stop out of our position and reverse with half the size
+    trailing_stop(account_name, base, underlying, size * 1.5, side, trail_value, reduce_only = False)
+
+    # now set another trailing stop for half the size
+    side = 'buy' if side == 'sell' else 'sell'
+    trailing_stop(account_name, base, underlying, size * 0.5, side, trail_value, reduce_only = True)
 
 
 
@@ -145,18 +152,18 @@ if __name__ == '__main__':
     parser = OptionParser(usage = usage)
     (options, args) = parser.parse_args()
 
-    if len(args) < 2:
+    if len(args) < 1:
         print(usage)
         exit()
 
     account_name = args[0]
-    dollar_target = float(args[1])
+    #dollar_target = float(args[1])
 
     # do the import here to avoid re-importing with the parallel calls
     from cryptomancer.security_master import SecurityMaster
     sm = SecurityMaster("FTX")
 
-    to_trade = ['BTC', 'ETH', 'DOGE', 'MATIC', 'ADA', 'SOL','XRP']
+    to_trade = ['BTC', 'ETH', 'ADA', 'XRP'] #'DOGE', 'MATIC', 'ADA', 'SOL', 'XRP']
 
     min_size = {}
     min_price_increment = {}
@@ -184,17 +191,30 @@ if __name__ == '__main__':
     proxy = {
         'BTC': 'BTC',
         'ETH': 'ETH',
-        'DOGE': 'DOGE',
-        'MATIC': 'MATIC',
-        'ADA': 'ADA',
-        'SOL': 'SOL',
-        'XRP': 'XRP'
+        #'DOGE': 'DOGE',
+        #'MATIC': 'MATIC',
+        'ADA': 'ETH',
+        #'SOL': 'SOL',
+        'XRP': 'ETH'
+    }
+
+    dollar_targets = {
+        'BTC': 5000,
+        'ETH': 5000,
+        'ADA': 2500,
+        'XRP': 2500
+        #'DOGE': 1500,
+        #'MATIC': 1500,
+        #'ADA': 1500,
+        #'SOL': 1500,
+        #'XRP': 1500
     }
 
     parameters = []
     for underlying in to_trade:
-        parameters.append((underlying, proxy[underlying], account_name, dollar_target, 
-                                            vol[underlying], min_size[underlying]))
+        parameters.append((underlying, proxy[underlying], 
+                                account_name, dollar_targets[underlying], 
+                                vol[underlying], min_size[underlying]))
     
     #run(*parameters[1])
     cryptomancer.parallel.lmap(run, parameters)
