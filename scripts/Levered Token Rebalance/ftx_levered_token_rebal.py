@@ -76,7 +76,7 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
 
     underlying_to_rebal = nav_to_rebal / mid_point
     
-    n_rebals = int(underlying_to_rebal / 4000000) + 1
+    n_rebals = int(abs(nav_to_rebal) / 4000000) + 1
 
     logger.info(f'{base} | Expected Rebalance of {proxy}-PERP: '
                 f'{locale.currency(nav_to_rebal, grouping = True)} / {underlying_to_rebal:,.2f} shares / {n_rebals} trades')
@@ -163,7 +163,7 @@ if __name__ == '__main__':
     from cryptomancer.security_master import SecurityMaster
     sm = SecurityMaster("FTX")
 
-    to_trade = ['BTC', 'ETH', 'ADA', 'XRP'] #'DOGE', 'MATIC', 'ADA', 'SOL', 'XRP']
+    to_trade = ['BTC', 'ETH', 'DOGE', 'MATIC', 'ADA', 'SOL', 'XRP']
 
     min_size = {}
     min_price_increment = {}
@@ -191,23 +191,21 @@ if __name__ == '__main__':
     proxy = {
         'BTC': 'BTC',
         'ETH': 'ETH',
-        #'DOGE': 'DOGE',
-        #'MATIC': 'MATIC',
-        'ADA': 'ETH',
-        #'SOL': 'SOL',
-        'XRP': 'ETH'
+        'DOGE': 'DOGE',
+        'MATIC': 'MATIC',
+        'ADA': 'ADA',
+        'SOL': 'SOL',
+        'XRP': 'XRP'
     }
 
     dollar_targets = {
-        'BTC': 5000,
+        'BTC': 10000,
         'ETH': 5000,
-        'ADA': 2500,
-        'XRP': 2500
-        #'DOGE': 1500,
-        #'MATIC': 1500,
-        #'ADA': 1500,
-        #'SOL': 1500,
-        #'XRP': 1500
+        'DOGE': 1500,
+        'MATIC': 1500,
+        'ADA': 1500,
+        'SOL': 1500,
+        'XRP': 1500
     }
 
     parameters = []
@@ -216,5 +214,5 @@ if __name__ == '__main__':
                                 account_name, dollar_targets[underlying], 
                                 vol[underlying], min_size[underlying]))
     
-    #run(*parameters[1])
+    #run(*parameters[0])
     cryptomancer.parallel.lmap(run, parameters)
