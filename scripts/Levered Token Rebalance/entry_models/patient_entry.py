@@ -29,9 +29,19 @@ def patient_entry(account_name: str, base: str, underlying: str, dollar_target: 
     account = FtxAccount(account_name)
     exchange_feed = FtxExchangeFeed(account_name)
 
+    logger.debug(f'{base} | Subscribing to market feed.')
     _ = exchange_feed.get_ticker(underlying)
-    # need to let the subscription go through...
-    time.sleep(3)
+    # need to let the subscription go through before we proceed
+    while True:
+        market = exchange_feed.get_ticker(underlying)
+        # make sure it's not an empty dict
+        # could also do `if not market`, but that
+        # seems like ugly code
+        if len(market) != 0:
+            break
+        time.sleep(0.1)
+        
+    logger.debug(f'{base} | Subscribed.')
 
     fills = []
     fill_prices = []
@@ -41,7 +51,7 @@ def patient_entry(account_name: str, base: str, underlying: str, dollar_target: 
         market = exchange_feed.get_ticker(underlying)
         mid_point = (market['bid'] + market['ask']) / 2.
         width = (market['ask'] - market['bid']) / mid_point
-        
+    
         size = dollar_target / mid_point
         limit_price = mid_point * (1 - width / 2) if side == 'buy' else mid_point * (1 + width / 2)
         
@@ -65,7 +75,9 @@ def patient_entry(account_name: str, base: str, underlying: str, dollar_target: 
                 pass
 
         else:
-            #logger.info(f'{base} | Failed {retry} times; now trying to take liquidity...')
+            logger.info(f'{base} | Failed {retry} times; now trying to take liquidity...')
+            break
+
             try:
                 with execution_scope(wait = True) as session:
                     underlying_order = AutoLimitOrder(account = account,
@@ -87,6 +99,15 @@ def patient_entry(account_name: str, base: str, underlying: str, dollar_target: 
 
         else:
             order_status = order_status[0]
+
+            while order_status.order_id != -1 and order_status.status == "open":
+                logger.info(f'{base} | Timed out, but waiting for order to cancel...')
+                try:
+                    ftx_account.cancel_order(order_status.order_id)
+                except:
+                    pass
+                time.sleep(0.1)
+                order_status = session.get_order_statuses()[0]
 
             # see if we got any fills.
             filled_size = order_status.filled_size

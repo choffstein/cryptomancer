@@ -47,7 +47,11 @@ def trailing_stop(account_name: str, base: str, underlying: str, size: float, si
     else:
         order_status = order_status[0]
 
-        while order_status.status == "open":
+        while order_status.order_id != -1 and order_status.status == "open":
+            try:
+                ftx_account.cancel_order(order_status.order_id)
+            except:
+                pass
             time.sleep(0.1)
             order_status = session.get_order_statuses()[0]
         

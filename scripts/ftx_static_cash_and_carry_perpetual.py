@@ -102,7 +102,8 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
                     session.add(underlying_order)
 
             except TimeoutError:
-                continue
+                logger.debug(f'Timed out.  Retrying.')
+                pass
 
             order_status = session.get_order_statuses()
             if len(order_status) == 0:
@@ -112,6 +113,15 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
 
             else:
                 order_status = order_status[0]
+
+                while order_status.status == "open":
+                    # make sure we don't get stuck in the loop; e.g. what happens if the cancel never got sent?
+                    try:
+                        ftx_account.cancel_order(order_status.order_id)
+                    except:
+                        pass
+                    time.sleep(0.1)
+                    order_status = session.get_order_statuses()[0]
 
                 # figure out how much of the order was actually filled
                 filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
@@ -152,8 +162,10 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
                                         post_only = True)
                 
                     session.add(perpetual_order)
+
             except TimeoutError:
-                continue
+                logger.debug(f'Timed out.  Retrying.')
+                pass
 
             order_status = session.get_order_statuses()
             if len(order_status) == 0:
@@ -163,6 +175,10 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
 
             else:
                 order_status = order_status[0]
+
+                while order_status.status == "open":
+                    time.sleep(0.1)
+                    order_status = session.get_order_statuses()[0]
 
                 filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
 

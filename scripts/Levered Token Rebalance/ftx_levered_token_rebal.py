@@ -46,9 +46,6 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
 
     underlying = f'{base}-PERP'
 
-    # SUBSCRIBE TO BID/ASK FEEDS + TRADES
-    _ = exchange_feed.get_ticker(underlying)
-
     if proxy == 'BTC':
         tokens_to_keep = ['BULL', 'BEAR', 'HALF', 'HEDGE']
     else:
@@ -90,7 +87,6 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
     else:
         tomorrow = now + datetime.timedelta(days = 1)
 
-    
     # REBAL TIME IS AT 00:02:00 UTC
     # THERE IS WEIRD, ABNORMALLY POSITIVE VOLUME AT 00:00.  IF WE'RE BUYING, BUY AT 23:59:30
     # IF WE ARE SELLING, SELL AT 00:01:30
@@ -104,10 +100,16 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
     time_until_entry = execution_time.timestamp() - now.timestamp()
     if time_until_entry > 0:
         logger.info(f"{base} | Sleeping for {time_until_entry:,.2f}s...")
-        time.sleep(time_until_entry)
+        #time.sleep(time_until_entry)
         logger.info(f"{base} | Awake and ready to put on trade!")
 
-    fills, fill_prices = patient_entry(account_name, base, underlying, dollar_target, side, 5, min_trade_size)
+    fills, fill_prices = patient_entry(account_name = account_name, 
+                                        base = base, 
+                                        underlying = underlying, 
+                                        dollar_target = dollar_target, 
+                                        side = side, 
+                                        timeout = 5, 
+                                        min_trade_size = min_trade_size)
 
     total_fill = numpy.sum(fills)
     average_fill_price = numpy.dot(fills, fill_prices) / numpy.sum(fills)
@@ -123,7 +125,7 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
 
     if time_until_end > 0:
         logger.info(f"{base} | Sleeping for {time_until_end:,.2f}s...")
-        time.sleep(time_until_end)
+        #time.sleep(time_until_end)
         logger.info(f"{base} | Awake and ready to put on the stop!")
 
 
@@ -191,21 +193,21 @@ if __name__ == '__main__':
     proxy = {
         'BTC': 'BTC',
         'ETH': 'ETH',
-        'DOGE': 'DOGE',
-        'MATIC': 'MATIC',
-        'ADA': 'ADA',
-        'SOL': 'SOL',
-        'XRP': 'XRP'
+        'DOGE': 'ETH',
+        'MATIC': 'ETH',
+        'ADA': 'ETH',
+        'SOL': 'ETH',
+        'XRP': 'ETH'
     }
 
     dollar_targets = {
-        'BTC': 10000,
-        'ETH': 5000,
-        'DOGE': 1500,
-        'MATIC': 1500,
-        'ADA': 1500,
-        'SOL': 1500,
-        'XRP': 1500
+        'BTC': 100,
+        'ETH': 100,
+        'DOGE': 100,
+        'MATIC': 100,
+        'ADA': 100,
+        'SOL': 100,
+        'XRP': 100
     }
 
     parameters = []
@@ -214,5 +216,5 @@ if __name__ == '__main__':
                                 account_name, dollar_targets[underlying], 
                                 vol[underlying], min_size[underlying]))
     
-    #run(*parameters[0])
-    cryptomancer.parallel.lmap(run, parameters)
+    run(*parameters[0])
+    #cryptomancer.parallel.lmap(run, parameters)

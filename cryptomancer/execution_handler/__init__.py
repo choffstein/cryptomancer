@@ -85,15 +85,10 @@ class Order:
         if timeout:
             status = self.get_status()
             start_time = status.created_time
-            
+        
         while True:
             if self.is_closed():
                 break
-
-            # TODO: Better sleep method
-            # May not even need this, as self.is_closed() is 
-            # likely a slow, blocking i/o process
-            time.sleep(0.1)
 
             if timeout:
                 now = pytz.utc.localize(datetime.datetime.utcnow())
@@ -101,6 +96,10 @@ class Order:
                 if elapsed > timeout:
                     raise TimeoutError("Order timed out.")
 
+            # TODO: Since we're not doing async status
+            # make sure we sleep to pass to other threads
+            # in this infinite loop.
+            time.sleep(0)
 
     def _get_parameters(self) -> dict:
         raise NotImplementedError

@@ -29,6 +29,7 @@ def execution_scope(wait: bool = True, timeout: Optional[int] = None, rollback: 
         if rollback:
             # rollback implicitly cancels orders
             session._rollback()
+            
         else:
             # no need to rollback; just cancel
             session._cancel()
@@ -91,6 +92,7 @@ class ExecutionSession(object):
         cancelled_orders = []
         for order in self._orders:
             if order.is_submitted():
+                order.cancel()
                 cancelled_orders.append(order)
 
         for order in cancelled_orders:
