@@ -25,7 +25,7 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
                         minimum_size: Optional[float] = 0.001,
                         force: Optional[bool] = False):
     underlying_name = f'{underlying}/USD'
-    future_name = f'{underlying}-PERP'
+    future_name = f'{underlying}-0924'
 
     # set up exchange subscriptions
     _ = exchange_feed.get_ticker(underlying_name)
@@ -76,16 +76,24 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
 
         target_usd_trade = target_exposure_usd - current_exposure_usd
 
+        # go half way
+        target_usd_trade = target_usd_trade / 2
+
+
         # we do the trade in the underlying first because we're trying to hit a specific
         # dollar amount; once we get that dollar amount executed, we can match it with
         # a corresponding trade in the perpetuals
         side = 'buy' if target_usd_trade > 1e-8 else 'sell'
         logger.info(f'{side.upper()} {locale.currency(target_usd_trade, grouping = True)} {underlying_name}')
 
+
         while True:
-            market = exchange_feed.get_ticker(underlying_name)
-            mid_point = (market['bid'] + market['ask']) / 2.
-            width = (market['ask'] - market['bid']) / mid_point
+            try:
+                market = exchange_feed.get_ticker(underlying_name)
+                mid_point = (market['bid'] + market['ask']) / 2.
+                width = (market['ask'] - market['bid']) / mid_point
+            except:
+                continue
 
             price = mid_point * (1 - width / 2) if side == 'buy' else mid_point * (1 + width / 2)
             size = abs(target_usd_trade) / price
@@ -125,14 +133,21 @@ def static_cash_and_carry(account: FtxAccount, exchange_feed: FtxExchangeFeed, u
 
                 # figure out how much of the order was actually filled
                 filled_size = order_status.filled_size if order_status.side == "buy" else -order_status.filled_size
+                filled_price = order_status.average_fill_price
 
                 if abs(filled_size) < 1e-8:
                     continue
 
                 underlying_size = underlying_size + filled_size
-
                 logger.info(f'Filled {filled_size} in {underlying_name} | Total: {underlying_size}')
-                break
+
+                target_usd_trade = target_usd_trade - filled_size * filled_price
+
+                # We might've gotten a partial fill; see if the remaining
+                # capital to trade is less than the minimum trade size
+                if abs(target_usd_trade) / filled_price < minimum_size:
+                    break
+                
 
 
     # if we have 5 underlying, we need -5 perpetuals

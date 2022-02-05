@@ -33,14 +33,15 @@ from exit_models.take_profit import take_profit
 
 
 def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
-
+    """
     try:
         account = FtxAccount(account_name)
         exchange_feed = FtxExchangeFeed(account_name)
     except Exception as e:
         logger.exception(e)
         sys.exit(0)
-
+    """
+    
     ftx_client = ftx.FtxClient()
     levered_tokens = ftx_client.get_levered_tokens()
 
@@ -77,7 +78,7 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
 
     logger.info(f'{base} | Expected Rebalance of {proxy}-PERP: '
                 f'{locale.currency(nav_to_rebal, grouping = True)} / {underlying_to_rebal:,.2f} shares / {n_rebals} trades')
-
+    
     side = 'buy' if underlying_to_rebal > 1e-8 else 'sell'
     
     # SLEEP UNTIL READY TO RUN
@@ -88,19 +89,18 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
         tomorrow = now + datetime.timedelta(days = 1)
 
     # REBAL TIME IS AT 00:02:00 UTC
-    # THERE IS WEIRD, ABNORMALLY POSITIVE VOLUME AT 00:00.  IF WE'RE BUYING, BUY AT 23:59:30
-    # IF WE ARE SELLING, SELL AT 00:01:30
+    # THERE IS WEIRD, ABNORMALLY POSITIVE VOLUME AT 00:00.  CHANGE ORDER BASED ON THIS ANOMALY.
     rebal_time = pytz.utc.localize(datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 2, 0, 0))
-    #if side == 'buy':
-    #    execution_time = rebal_time - datetime.timedelta(seconds = 30*5)
-    #else:
-    execution_time = rebal_time - datetime.timedelta(seconds = 30)
+    if side == 'buy':
+        execution_time = rebal_time - datetime.timedelta(seconds = 30*5)      # start trying to enter the buy at 23:59:30
+    else:
+        execution_time = rebal_time - datetime.timedelta(seconds = 60) # start trying to enter the sale at 00:01:00
     
     # do a patient entry 
     time_until_entry = execution_time.timestamp() - now.timestamp()
     if time_until_entry > 0:
         logger.info(f"{base} | Sleeping for {time_until_entry:,.2f}s...")
-        #time.sleep(time_until_entry)
+        time.sleep(time_until_entry)
         logger.info(f"{base} | Awake and ready to put on trade!")
 
     fills, fill_prices = patient_entry(account_name = account_name, 
@@ -125,10 +125,9 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
 
     if time_until_end > 0:
         logger.info(f"{base} | Sleeping for {time_until_end:,.2f}s...")
-        #time.sleep(time_until_end)
+        time.sleep(time_until_end)
         logger.info(f"{base} | Awake and ready to put on the stop!")
-
-
+    
     # WITH THE FILLED SIZE, SET A TRAILING STOP SO WE CAN
     # TRY TO BENEFIT FROM ANY MOMENTUM THAT OCCURS
     # THIS CODE IS LIQUIDITY TAKING, BUT LIKELY CHEAPER
@@ -138,7 +137,7 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
 
     market = ftx_client.get_market(underlying)
     mid_point = (market['bid'] + market['ask']) / 2.
-    trail_value = mid_point * volatility
+    trail_value = mid_point * (volatility * 2)
 
     # stop out of our position and reverse with half the size
     trailing_stop(account_name, base, underlying, size * 1.5, side, trail_value, reduce_only = False)
@@ -146,7 +145,7 @@ def run(base, proxy, account_name, dollar_target, volatility, min_trade_size):
     # now set another trailing stop for half the size
     side = 'buy' if side == 'sell' else 'sell'
     trailing_stop(account_name, base, underlying, size * 0.5, side, trail_value, reduce_only = True)
-
+    
 
 
 if __name__ == '__main__':
@@ -165,7 +164,7 @@ if __name__ == '__main__':
     from cryptomancer.security_master import SecurityMaster
     sm = SecurityMaster("FTX")
 
-    to_trade = ['BTC', 'ETH', 'DOGE', 'MATIC', 'ADA', 'SOL', 'XRP']
+    to_trade = ['BTC', 'ETH', 'DOGE', 'XRP', 'ADA', 'SOL', 'MATIC']
 
     min_size = {}
     min_price_increment = {}
@@ -193,21 +192,21 @@ if __name__ == '__main__':
     proxy = {
         'BTC': 'BTC',
         'ETH': 'ETH',
-        'DOGE': 'ETH',
-        'MATIC': 'ETH',
-        'ADA': 'ETH',
-        'SOL': 'ETH',
-        'XRP': 'ETH'
+        'DOGE': 'DOGE',
+        'MATIC': 'MATIC',
+        'ADA': 'ADA',
+        'SOL': 'SOL',
+        'XRP': 'XRP'
     }
 
     dollar_targets = {
-        'BTC': 100,
-        'ETH': 100,
-        'DOGE': 100,
-        'MATIC': 100,
-        'ADA': 100,
-        'SOL': 100,
-        'XRP': 100
+        'BTC': 1000,
+        'ETH': 1000,
+        'DOGE': 1000,
+        'MATIC': 1000,
+        'ADA': 1000,
+        'SOL': 1000,
+        'XRP': 1000
     }
 
     parameters = []
@@ -216,5 +215,5 @@ if __name__ == '__main__':
                                 account_name, dollar_targets[underlying], 
                                 vol[underlying], min_size[underlying]))
     
-    run(*parameters[0])
-    #cryptomancer.parallel.lmap(run, parameters)
+    #run(*parameters[0])
+    cryptomancer.parallel.lmap(run, parameters)
